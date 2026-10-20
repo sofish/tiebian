@@ -93,7 +93,7 @@ final class UndoToastController {
     }
 }
 
-private struct UndoToastView: View {
+struct UndoToastView: View {
     let note: StickyNote
     let onUndo: () -> Void
     let onDismiss: () -> Void

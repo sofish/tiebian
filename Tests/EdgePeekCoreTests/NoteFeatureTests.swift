@@ -210,4 +210,35 @@ final class NoteGroupingTests: XCTestCase {
         XCTAssertTrue(tags.contains("#快捷键"))
         XCTAssertTrue(tags.contains("#灵感"))
     }
+
+    func testDeleteAndUndoRestoreAllFieldsAndPersistWithoutDuplicates() throws {
+        let (store, directory) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let note = store.addNote(content: "要恢复的完整内容\n#工作", color: .rose)
+        store.togglePin(id: note.id)
+        store.setDueDate(id: note.id, dueAt: Date().addingTimeInterval(3600))
+        let snapshot = try XCTUnwrap(store.note(with: note.id))
+
+        store.delete(id: note.id)
+        XCTAssertNil(store.note(with: note.id))
+        store.restore(snapshot)
+        store.restore(snapshot)
+        XCTAssertEqual(store.notes.count, 1)
+        XCTAssertEqual(store.note(with: note.id), snapshot)
+        store.saveNow()
+
+        let reloaded = NoteStore(fileURL: store.fileURL, seedIfMissing: false)
+        XCTAssertEqual(reloaded.notes.count, 1)
+        let restored = try XCTUnwrap(reloaded.note(with: note.id))
+        XCTAssertEqual(restored.id, snapshot.id)
+        XCTAssertEqual(restored.content, snapshot.content)
+        XCTAssertEqual(restored.color, snapshot.color)
+        XCTAssertEqual(restored.isPinned, snapshot.isPinned)
+        XCTAssertEqual(try XCTUnwrap(restored.dueAt).timeIntervalSince1970,
+                       try XCTUnwrap(snapshot.dueAt).timeIntervalSince1970, accuracy: 1)
+        XCTAssertEqual(restored.createdAt.timeIntervalSince1970,
+                       snapshot.createdAt.timeIntervalSince1970, accuracy: 1)
+        XCTAssertEqual(restored.updatedAt.timeIntervalSince1970,
+                       snapshot.updatedAt.timeIntervalSince1970, accuracy: 1)
+    }
 }

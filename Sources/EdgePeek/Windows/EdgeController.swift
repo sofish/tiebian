@@ -28,6 +28,9 @@ final class EdgeController: NSObject {
 
     private var cancellables = Set<AnyCancellable>()
     private var mouseTimer: Timer?
+    private var globalMouseMonitor: Any?
+    private let mouseLocation: () -> CGPoint
+    private let sizePreference: SeamSizePreference
     private var dueTimer: Timer?
     private var keyMonitor: Any?
     private var dragGlow: EdgeGlowWindow?
@@ -48,8 +51,14 @@ final class EdgeController: NSObject {
 
     private static let anchorKey = "EdgePeek.anchor.v1"
 
-    init(store: NoteStore) {
+    init(
+        store: NoteStore,
+        mouseLocation: @escaping () -> CGPoint = { NSEvent.mouseLocation },
+        sizePreference: SeamSizePreference = SeamSizePreference()
+    ) {
         self.store = store
+        self.mouseLocation = mouseLocation
+        self.sizePreference = sizePreference
 
         var loadedAnchor = Self.loadAnchor()
         if let raw = ProcessInfo.processInfo.environment["EDGEPEEK_POSITION"],
@@ -98,11 +107,37 @@ final class EdgeController: NSObject {
         }
         installScreenObserver()
         installKeyMonitor()
+        // Global mouse events are delivered while another app is active;
+        // tracking areas and the polling timer remain as fallbacks.
+        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
+            self?.mouseTick()
+        }
         startTimers()
         applyDebugLaunchOptions()
     }
 
     // MARK: - Public actions
+
+    var seamLengthRange: ClosedRange<Double> {
+        SeamSizing.range(edge: anchor.edge, availableSize: edgeBounds(for: currentScreen).size)
+    }
+
+    var seamLength: Double {
+        SeamSizing.length(sizePreference.length, edge: anchor.edge,
+                          availableSize: edgeBounds(for: currentScreen).size)
+    }
+
+    func setSeamLength(_ length: Double) {
+        guard length.isFinite else { return }
+        let requested = max(SeamSizing.minimumLength, length)
+        guard requested != sizePreference.length else { return }
+        let previousLength = seamLength
+        sizePreference.length = requested
+        guard seamLength != previousLength else { return }
+        closeBoard(animated: false)
+        hidePreview(immediately: true)
+        refreshSeam(reposition: true, animated: false)
+    }
 
     func createNote() {
         if editor.isOpen {
@@ -147,6 +182,10 @@ final class EdgeController: NSObject {
         shuttingDown = true
         mouseTimer?.invalidate()
         mouseTimer = nil
+        if let globalMouseMonitor {
+            NSEvent.removeMonitor(globalMouseMonitor)
+            self.globalMouseMonitor = nil
+        }
         dueTimer?.invalidate()
         dueTimer = nil
         if let keyMonitor {
@@ -172,7 +211,7 @@ final class EdgeController: NSObject {
     // MARK: - Setup
 
     private func buildSeam() {
-        let size = SeamMetrics.panelSize(edge: anchor.edge)
+        let size = SeamMetrics.panelSize(edge: anchor.edge, length: seamLength)
         let frame = seamFrame(for: anchor, screen: currentScreen)
         let panel = PanelFactory.make(frame: frame, keyable: false)
         panel.hasShadow = false
@@ -342,7 +381,7 @@ final class EdgeController: NSObject {
             }
         }
 
-        let size = SeamMetrics.panelSize(edge: newAnchor.edge)
+        let size = SeamMetrics.panelSize(edge: newAnchor.edge, length: seamLength)
         let target = EdgeGeometry.frame(
             for: newAnchor,
             size: size,
@@ -454,6 +493,7 @@ final class EdgeController: NSObject {
             self.openWork = nil
             guard !self.boardVisible,
                   !self.editor.isOpen,
+                  !self.ignoreHoverUntilExit,
                   self.isMouseInsideSeam(),
                   Date() >= self.suppressHoverUntil else { return }
             self.showBoard()
@@ -495,7 +535,7 @@ final class EdgeController: NSObject {
     }
 
     private func currentMouseLocation() -> CGPoint {
-        simulatedMouse ?? NSEvent.mouseLocation
+        simulatedMouse ?? mouseLocation()
     }
 
     // MARK: - Board
@@ -913,7 +953,11 @@ final class EdgeController: NSObject {
     private func seamFrame(for anchor: EdgeAnchor, screen: NSScreen) -> CGRect {
         EdgeGeometry.frame(
             for: anchor,
-            size: SeamMetrics.panelSize(edge: anchor.edge),
+            size: SeamMetrics.panelSize(
+                edge: anchor.edge,
+                length: SeamSizing.length(sizePreference.length, edge: anchor.edge,
+                                          availableSize: edgeBounds(for: screen).size)
+            ),
             in: edgeBounds(for: screen),
             inset: 0
         )

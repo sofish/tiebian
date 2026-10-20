@@ -71,11 +71,10 @@ enum AngleHash {
 }
 
 enum SeamMetrics {
-    static let length: CGFloat = 220
     static let depth: CGFloat = 24
     static let lineWidth: CGFloat = 1.7
 
-    static func panelSize(edge: EdgeSide) -> CGSize {
+    static func panelSize(edge: EdgeSide, length: CGFloat) -> CGSize {
         edge.isVertical
             ? CGSize(width: depth, height: length)
             : CGSize(width: length, height: depth)
@@ -87,8 +86,9 @@ enum BoardMetrics {
     static let cardHeight: CGFloat = 92
     static let cardGap: CGFloat = 10
     static let groupGap: CGFloat = 34
-    static let labelGutter: CGFloat = 86
-    static let columnWidth: CGFloat = labelGutter + cardWidth
+    static let labelHeight: CGFloat = 28
+    static let labelGap: CGFloat = 12
+    static let columnWidth: CGFloat = cardWidth
     static let boardPadding: CGFloat = 20
     static let pagerHeight: CGFloat = 34
     static let naturalStep: CGFloat = cardHeight + cardGap
@@ -177,6 +177,7 @@ struct GroupBoardLayout {
         let availableHeight = max(
             BoardMetrics.cardHeight,
             maxBoardHeight - BoardMetrics.boardPadding * 2 - pagerReserve
+                - BoardMetrics.labelHeight - BoardMetrics.labelGap
         )
 
         let maxCount = entities.map(\.count).max() ?? 1
@@ -207,6 +208,7 @@ struct GroupBoardLayout {
             + CGFloat(pageColumns) * BoardMetrics.columnWidth
             + CGFloat(max(0, pageColumns - 1)) * BoardMetrics.groupGap
         let pageHeight = BoardMetrics.boardPadding * 2
+            + BoardMetrics.labelHeight + BoardMetrics.labelGap
             + commonHeight
             + (pageCount > 1 ? BoardMetrics.pagerHeight : 0)
 
@@ -223,14 +225,15 @@ struct GroupBoardLayout {
             let notes = entity.notesForColumn
             let stackHeight = BoardMetrics.cardHeight
                 + CGFloat(max(0, notes.count - 1)) * step
-            let stackTop = BoardMetrics.boardPadding
+            let groupTop = BoardMetrics.boardPadding
                 + (commonHeight - stackHeight) / 2
+            let stackTop = groupTop + BoardMetrics.labelHeight + BoardMetrics.labelGap
 
             let labelFrame = CGRect(
                 x: columnX,
-                y: BoardMetrics.boardPadding,
-                width: BoardMetrics.labelGutter - 12,
-                height: commonHeight
+                y: groupTop,
+                width: BoardMetrics.columnWidth,
+                height: BoardMetrics.labelHeight
             )
 
             var cards: [BoardCardPlacement] = []
@@ -239,7 +242,7 @@ struct GroupBoardLayout {
                     BoardCardPlacement(
                         note: note,
                         frame: CGRect(
-                            x: columnX + BoardMetrics.labelGutter,
+                            x: columnX,
                             y: stackTop + CGFloat(noteIndex) * step,
                             width: BoardMetrics.cardWidth,
                             height: BoardMetrics.cardHeight

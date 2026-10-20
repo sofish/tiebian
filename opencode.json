@@ -5,7 +5,7 @@
       "edgepeek": {
         "type": "local",
         "command": [
-          "/Users/sofish/Codes/tiebian/dist/贴边.app/Contents/MacOS/edgepeek-mcp"
+          "/Applications/贴边.app/Contents/MacOS/edgepeek-mcp"
         ]
       }
     }

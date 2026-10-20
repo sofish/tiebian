@@ -158,7 +158,7 @@ public final class NoteStore: ObservableObject {
         scheduleSave()
     }
 
-    /// Used by the undo toast after a note is thrown away.
+    /// Used by the undo toast after an explicit deletion.
     public func restore(_ note: StickyNote) {
         guard !notes.contains(where: { $0.id == note.id }) else { return }
         notes.append(note)
@@ -305,7 +305,7 @@ public final class NoteStore: ObservableObject {
                 updatedAt: now
             ),
             StickyNote(
-                content: "按住便签上的胶带\n整张纸会跟着走；甩出去就删除。\n拖着细条可以换边。\n#用法",
+                content: "按住便签上的胶带\n拖动整张纸，松手停在新位置。\n「…」里可以删除，删后可撤销。\n拖着细条可以换边。\n#用法",
                 color: .apricot,
                 createdAt: now.addingTimeInterval(-60),
                 updatedAt: now.addingTimeInterval(-60)

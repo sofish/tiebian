@@ -6,7 +6,7 @@
 dist/贴边.app/Contents/MacOS/edgepeek-mcp
 ```
 
-它是一个 **stdio MCP server**。Agent 客户端负责启动它；它不需要单独开端口，也不访问网络。每次工具调用都直接读写贴边使用的同一份 `notes.json`。贴边 App 正在运行时会监听这个文件，Agent 改完几毫秒内界面就会刷新；App 没开时，下次启动会读到新内容。
+它是一个 **stdio MCP server**。Agent 客户端负责启动它；它不需要单独开端口，也不访问网络。每次工具调用都直接读写贴边使用的同一份 `notes.json`。贴边 App 正在运行时会监听这个文件，Agent 修改后界面会自动刷新；App 没开时，下次启动会读到新内容。
 
 ## 打开方式
 
@@ -24,7 +24,19 @@ dist/贴边.app/Contents/MacOS/edgepeek-mcp
 
 3. 把它配置到你的 Agent 客户端。
 
-> 也可以从菜单栏「贴边 → Agent / MCP…」直接复制下面的配置，路径会自动填好。
+> 菜单栏「本地 MCP…」只提供「复制 Prompt」和「关闭」。复制后发给正在使用的 Agent，让它识别当前客户端、保留已有服务器并完成配置；不需要先选择 OpenCode / Claude 等客户端。
+
+Prompt 使用当前运行 App 的实际安装位置生成绝对路径，不含开发者账户路径。比如默认安装到 `/Applications/贴边.app` 时，helper 位于 `/Applications/贴边.app/Contents/MacOS/edgepeek-mcp`；放在其他本机文件夹或重命名后，重新打开 App 并复制即可。移动或重命名 App 后，旧客户端配置不会自行更新，需要再复制一次 Prompt。应先把 App 从 DMG 放到永久本机位置；Prompt 会要求 Agent 检查磁盘映像和 AppTranslocation，避免保存临时路径。
+
+helper 缺失时窗口说明原因并禁用复制。Prompt 只要求通过 initialize / tools/list 验证，不读写测试便签，也不安装额外后台服务。
+
+## 启动与设置
+
+- 菜单栏「配置」区集中管理光条大小、本地 MCP、便签存放位置和贴边位置重置。
+- 「启动」区的「登录时启动贴边」通过 macOS 登录项控制 App 自启动；勾选代表已启用，半选并显示「待系统批准」表示还需在系统设置批准。待批准时仍可取消注册。
+- 「管理系统登录项…」直接打开 macOS 的登录项设置。
+- MCP 保持 stdio：客户端启动并持有它的输入/输出管道，连接时自动启动，不单独注册开机常驻进程。贴边 App 未运行也能使用 MCP；App 自启动和 MCP 按需启动是两个独立的生命周期。
+- 配置菜单只生成并复制文本，不会自动修改客户端文件或安装后台服务。
 
 ### OpenCode
 
@@ -37,7 +49,7 @@ dist/贴边.app/Contents/MacOS/edgepeek-mcp
     "servers": {
       "edgepeek": {
         "type": "local",
-        "command": ["/Users/sofish/Codes/tiebian/dist/贴边.app/Contents/MacOS/edgepeek-mcp"]
+        "command": ["/Applications/贴边.app/Contents/MacOS/edgepeek-mcp"]
       }
     }
   }
@@ -47,7 +59,7 @@ dist/贴边.app/Contents/MacOS/edgepeek-mcp
 ### Claude Code
 
 ```bash
-claude mcp add edgepeek -- "/Users/sofish/Codes/tiebian/dist/贴边.app/Contents/MacOS/edgepeek-mcp"
+claude mcp add edgepeek -- "/Applications/贴边.app/Contents/MacOS/edgepeek-mcp"
 ```
 
 OpenCode 也可以直接用命令添加，避免手改 JSON：
@@ -64,7 +76,7 @@ opencode mcp add edgepeek -- "$(pwd)/dist/贴边.app/Contents/MacOS/edgepeek-mcp
 {
   "mcpServers": {
     "edgepeek": {
-      "command": "/Users/sofish/Codes/tiebian/dist/贴边.app/Contents/MacOS/edgepeek-mcp"
+      "command": "/Applications/贴边.app/Contents/MacOS/edgepeek-mcp"
     }
   }
 }

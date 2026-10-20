@@ -7,6 +7,7 @@ struct EditorView: View {
     let isNew: Bool
     let onClose: () -> Void
     let onDelete: () -> Void
+    let onDragEnded: () -> Void
 
     @State private var text: String
     @State private var showActions = false
@@ -21,13 +22,15 @@ struct EditorView: View {
         note: StickyNote,
         isNew: Bool,
         onClose: @escaping () -> Void,
-        onDelete: @escaping () -> Void
+        onDelete: @escaping () -> Void,
+        onDragEnded: @escaping () -> Void
     ) {
         self.store = store
         self.noteID = note.id
         self.isNew = isNew
         self.onClose = onClose
         self.onDelete = onDelete
+        self.onDragEnded = onDragEnded
         _text = State(initialValue: NoteText.plainText(from: note.content))
         _dueDraft = State(
             initialValue: note.dueAt ?? Date().addingTimeInterval(60 * 60)
@@ -68,7 +71,7 @@ struct EditorView: View {
                 .padding(.top, 80)
 
             tape
-                .offset(y: 70)
+                .offset(y: 60)
         }
         .frame(width: Layout.editorSize.width, height: Layout.editorSize.height)
         .onExitCommand {
@@ -244,12 +247,17 @@ struct EditorView: View {
     }
 
     private var tape: some View {
-        TapeShape()
-            .fill(Theme.tape.opacity(0.48))
-            .frame(width: 106, height: 23)
-            .rotationEffect(.degrees(-4.5))
-            .blendMode(.multiply)
-            .allowsHitTesting(false)
+        ZStack {
+            TapeShape()
+                .fill(Theme.tape.opacity(0.48))
+                .frame(width: 106, height: 23)
+                .rotationEffect(.degrees(-4.5))
+                .blendMode(.multiply)
+                .allowsHitTesting(false)
+            WindowDragHandle(onDragEnded: onDragEnded)
+        }
+        .frame(width: 184, height: 44)
+        .contentShape(Rectangle())
     }
 
     // MARK: - Due date

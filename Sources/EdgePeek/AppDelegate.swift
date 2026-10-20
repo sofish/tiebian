@@ -1,5 +1,6 @@
 import AppKit
 import EdgePeekCore
+import ServiceManagement
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -7,7 +8,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var controller: EdgeController!
     private var statusItem: NSStatusItem!
     private var hotKey: GlobalHotKey?
-    private var launchAtLoginItem: NSMenuItem!
+    private var launchAtLoginItem: NSMenuItem?
+    private var seamSizeView: SeamSizeMenuView?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppFonts.register()
@@ -50,6 +52,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             button.setAccessibilityLabel("贴边")
         }
 
+        statusItem.menu = buildStatusMenu()
+    }
+
+    func buildStatusMenu() -> NSMenu {
         let menu = NSMenu()
         menu.delegate = self
 
@@ -64,6 +70,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
+        menu.addItem(.sectionHeader(title: "配置"))
+
+        let sizeItem = NSMenuItem(title: "光条大小", action: nil, keyEquivalent: "")
+        let sizeMenu = NSMenu(title: "光条大小")
+        sizeMenu.delegate = self
+        let sliderItem = NSMenuItem()
+        let sizeView = SeamSizeMenuView()
+        sizeView.onChange = { [weak self] length in self?.controller?.setSeamLength(length) }
+        seamSizeView = sizeView
+        sliderItem.view = sizeView
+        sizeMenu.addItem(sliderItem)
+        let resetSize = NSMenuItem(title: "恢复默认尺寸（2 倍）",
+                                  action: #selector(resetSeamSize), keyEquivalent: "")
+        resetSize.target = self
+        sizeMenu.addItem(resetSize)
+        sizeItem.submenu = sizeMenu
+        menu.addItem(sizeItem)
+
+        let mcpItem = NSMenuItem(title: "本地 MCP…", action: #selector(showMCPInfo), keyEquivalent: "")
+        mcpItem.target = self
+        menu.addItem(mcpItem)
+
         let revealItem = NSMenuItem(
             title: "便签存放位置",
             action: #selector(revealNotes),
@@ -71,22 +99,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         )
         revealItem.target = self
         menu.addItem(revealItem)
-
-        let mcpItem = NSMenuItem(
-            title: "Agent / MCP…",
-            action: #selector(showMCPInfo),
-            keyEquivalent: ""
-        )
-        mcpItem.target = self
-        menu.addItem(mcpItem)
-
-        launchAtLoginItem = NSMenuItem(
-            title: "登录时打开",
-            action: #selector(toggleLaunchAtLogin),
-            keyEquivalent: ""
-        )
-        launchAtLoginItem.target = self
-        menu.addItem(launchAtLoginItem)
 
         let resetItem = NSMenuItem(
             title: "重置贴边位置",
@@ -96,6 +108,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         resetItem.target = self
         menu.addItem(resetItem)
 
+        menu.addItem(.separator())
+
+        menu.addItem(.sectionHeader(title: "启动"))
+        let loginItem = NSMenuItem(title: "登录时启动贴边",
+                                   action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+        loginItem.target = self
+        launchAtLoginItem = loginItem
+        menu.addItem(loginItem)
+        let loginSettings = NSMenuItem(title: "管理系统登录项…",
+                                       action: #selector(openLoginSettings), keyEquivalent: "")
+        loginSettings.target = self
+        menu.addItem(loginSettings)
         menu.addItem(.separator())
 
         let aboutItem = NSMenuItem(
@@ -114,11 +138,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         quitItem.target = self
         menu.addItem(quitItem)
 
-        statusItem.menu = menu
+        menuWillOpen(menu)
+        return menu
     }
 
     func menuWillOpen(_ menu: NSMenu) {
-        launchAtLoginItem.state = LaunchAtLogin.isEnabled ? .on : .off
+        if let controller {
+            seamSizeView?.update(value: controller.seamLength, range: controller.seamLengthRange)
+        }
+        updateStartupMenu(status: LaunchAtLogin.status)
     }
 
     // MARK: - Main menu
@@ -185,62 +213,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controller.resetPosition()
     }
 
-    private var mcpHelperPath: String {
-        if let executable = Bundle.main.executableURL {
-            let sibling = executable
-                .deletingLastPathComponent()
-                .appendingPathComponent("edgepeek-mcp")
-            if FileManager.default.fileExists(atPath: sibling.path) {
-                return sibling.path
-            }
-            return sibling.path
-        }
-        return URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-            .appendingPathComponent("dist/贴边.app/Contents/MacOS/edgepeek-mcp")
-            .path
+    @objc private func resetSeamSize() {
+        controller.setSeamLength(SeamSizing.defaultLength)
+    }
+
+    func makeMCPAlert(configuration: MCPConfiguration = .bundled) -> NSAlert {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "让 Agent 连接贴边"
+        alert.informativeText = """
+        复制 Prompt，发给你正在使用的 Agent，它会完成本地 MCP 配置。
+
+        当前安装位置：
+        \(configuration.appURL.path)
+
+        移动或重命名 App 后，请重新复制 Prompt。便签只在本机读写。
+        \(configuration.isAvailable ? "" : "\n应用内缺少 MCP 服务，请重新安装完整的贴边 App。")
+        """
+        alert.addButton(withTitle: "复制 Prompt").isEnabled = configuration.isAvailable
+        alert.addButton(withTitle: "关闭").keyEquivalent = "\u{1b}"
+        return alert
     }
 
     @objc private func showMCPInfo() {
         NSApp.activate(ignoringOtherApps: true)
-        let helper = mcpHelperPath
-        let exists = FileManager.default.fileExists(atPath: helper)
-        let openCodeConfig = """
-        {
-          "$schema": "https://opencode.ai/config.json",
-          "mcp": {
-            "servers": {
-              "edgepeek": {
-                "type": "local",
-                "command": ["\(helper)"]
-              }
-            }
-          }
-        }
-        """
-        let claudeCommand = "claude mcp add edgepeek -- \"\(helper)\""
-
-        let alert = NSAlert()
-        alert.alertStyle = .informational
-        alert.messageText = "让 Agent 读写贴边便签"
-        alert.informativeText = """
-        MCP 服务已随贴边一起安装。它直接读写同一份 notes.json，正在运行的贴边会自动刷新。
-
-        \(helper)
-        \(exists ? "" : "（未找到这个文件，请先运行 ./scripts/build-app.sh release 构建 App）")
-
-        工具：list_notes / list_groups / get_note / create_note / update_note / delete_note / search_notes
-
-         把 OpenCode 配置粘进 opencode.json 的 mcp.servers 段，重启 OpenCode 即可使用。
-        """
-        alert.addButton(withTitle: "复制 OpenCode 配置")
-        alert.addButton(withTitle: "复制 Claude 命令")
-        alert.addButton(withTitle: "好")
-
-        let response = alert.runModal()
-        if response == .alertFirstButtonReturn {
-            copyToPasteboard(openCodeConfig)
-        } else if response == .alertSecondButtonReturn {
-            copyToPasteboard(claudeCommand)
+        let configuration = MCPConfiguration.bundled
+        guard makeMCPAlert(configuration: configuration).runModal() == .alertFirstButtonReturn else { return }
+        do {
+            copyToPasteboard(try configuration.installationPrompt())
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "无法复制 Prompt"
+            alert.informativeText = error.localizedDescription
+            alert.addButton(withTitle: "关闭")
+            alert.runModal()
         }
     }
 
@@ -252,14 +258,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleLaunchAtLogin() {
         do {
-            try LaunchAtLogin.setEnabled(!LaunchAtLogin.isEnabled)
+            try LaunchAtLogin.setEnabled(!LaunchAtLogin.isRegistered)
             if LaunchAtLogin.requiresApproval {
                 let alert = NSAlert()
                 alert.messageText = "还需要一步确认"
                 alert.informativeText = "请到「系统设置 › 通用 › 登录项与扩展」中允许「贴边」在登录时打开。"
-                alert.addButton(withTitle: "好")
+                alert.addButton(withTitle: "打开系统设置")
+                alert.addButton(withTitle: "稍后")
                 NSApp.activate(ignoringOtherApps: true)
-                alert.runModal()
+                if alert.runModal() == .alertFirstButtonReturn {
+                    LaunchAtLogin.openSettings()
+                }
             }
         } catch {
             let alert = NSAlert()
@@ -269,6 +278,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NSApp.activate(ignoringOtherApps: true)
             alert.runModal()
         }
+    }
+
+    func updateStartupMenu(status: SMAppService.Status) {
+        switch status {
+        case .enabled:
+            launchAtLoginItem?.title = "登录时启动贴边"
+            launchAtLoginItem?.state = .on
+        case .requiresApproval:
+            launchAtLoginItem?.title = "登录时启动贴边（待系统批准）"
+            launchAtLoginItem?.state = .mixed
+        default:
+            launchAtLoginItem?.title = "登录时启动贴边"
+            launchAtLoginItem?.state = .off
+        }
+    }
+
+    @objc private func openLoginSettings() {
+        LaunchAtLogin.openSettings()
     }
 
     @objc private func showAbout() {
@@ -282,8 +309,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         )
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "贴边",
-            .applicationVersion: "1.0.0",
-            .version: "1",
+            .applicationVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
+            .version: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "",
             .credits: credits,
             .applicationIcon: NSImage(named: NSImage.applicationIconName)
                 ?? MenuBarIcon.make()

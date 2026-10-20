@@ -90,7 +90,6 @@ struct GroupBoardView: View {
                         color: Theme.ink.opacity(0.8),
                         lineLimit: 1
                     )
-                    .frame(maxWidth: group.labelFrame.width - 24, alignment: .leading)
                 }
                 .padding(.horizontal, 7)
                 .padding(.vertical, 5)

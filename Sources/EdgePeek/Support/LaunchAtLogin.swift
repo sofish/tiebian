@@ -2,21 +2,27 @@ import Foundation
 import ServiceManagement
 
 enum LaunchAtLogin {
-    static var isEnabled: Bool {
-        SMAppService.mainApp.status == .enabled
+    static var status: SMAppService.Status { SMAppService.mainApp.status }
+
+    static var isRegistered: Bool {
+        status == .enabled || status == .requiresApproval
     }
 
     static var requiresApproval: Bool {
-        SMAppService.mainApp.status == .requiresApproval
+        status == .requiresApproval
     }
 
     static func setEnabled(_ enabled: Bool) throws {
         if enabled {
-            guard SMAppService.mainApp.status != .enabled else { return }
+            guard !isRegistered else { return }
             try SMAppService.mainApp.register()
         } else {
-            guard SMAppService.mainApp.status == .enabled else { return }
+            guard isRegistered else { return }
             try SMAppService.mainApp.unregister()
         }
+    }
+
+    static func openSettings() {
+        SMAppService.openSystemSettingsLoginItems()
     }
 }

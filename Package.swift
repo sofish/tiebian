@@ -31,6 +31,11 @@ let package = Package(
             name: "EdgePeekCoreTests",
             dependencies: ["EdgePeekCore"],
             path: "Tests/EdgePeekCoreTests"
+        ),
+        .testTarget(
+            name: "EdgePeekTests",
+            dependencies: ["EdgePeek", "EdgePeekCore"],
+            path: "Tests/EdgePeekTests"
         )
     ],
     swiftLanguageModes: [.v5]
