@@ -36,10 +36,13 @@ def populate_bundle(app, binaries, resources, commit, dirty):
     target_resources = app / "Contents/Resources"
     macos.mkdir(parents=True)
     target_resources.mkdir()
-    for executable in ["EdgePeek", "edgepeek-mcp"]:
+    for executable in ["EdgePeek", "edgepeek-cli"]:
         shutil.copy2(binaries / executable, macos / executable)
     for name in ["AppIcon.icns", "KingHwaOldSong.ttf", "KingHwaOldSong-LICENSE.txt"]:
         shutil.copy2(resources / name, target_resources / name)
+    skill = target_resources / "Skills/edgepeek"
+    skill.mkdir(parents=True)
+    shutil.copy2(resources / "Skills/edgepeek/SKILL.md", skill / "SKILL.md")
     info = plistlib.loads((resources / "Info.plist").read_bytes())
     info["EdgePeekSourceCommit"] = commit
     info["EdgePeekSourceDirty"] = dirty
@@ -60,10 +63,10 @@ def build(config, destination, identity="-", universal=False):
         app = Path(temporary) / "贴边.app"
         populate_bundle(app, binaries, ROOT / "Resources", commit, dirty)
         if universal:
-            for executable in ["EdgePeek", "edgepeek-mcp"]:
+            for executable in ["EdgePeek", "edgepeek-cli"]:
                 verify_universal(app / "Contents/MacOS" / executable)
         signing = signing_arguments(identity)
-        run(["codesign", "--force", *signing, app / "Contents/MacOS/edgepeek-mcp"])
+        run(["codesign", "--force", *signing, app / "Contents/MacOS/edgepeek-cli"])
         run(["codesign", "--force", *signing, app])
         run(["codesign", "--verify", "--deep", "--strict", app])
         previous = Path(temporary) / "previous.app"

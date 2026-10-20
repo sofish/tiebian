@@ -4,6 +4,8 @@ import SwiftUI
 @MainActor
 final class SeamState: ObservableObject {
     @Published var edge: EdgeSide = .left
+    @Published var width = SeamSizing.defaultWidth
+    @Published var animation: SeamAnimation = .flow
     @Published var isHovered = false
     @Published var isDragging = false
     @Published var isSnapping = false

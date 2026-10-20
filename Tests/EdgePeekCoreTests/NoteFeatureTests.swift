@@ -156,14 +156,14 @@ final class NoteGroupingTests: XCTestCase {
             [StickyNote].self,
             from: Data(contentsOf: store.fileURL)
         )
-        onDisk[0].content = "MCP 写的新内容\n#用法"
+        onDisk[0].content = "CLI 写的新内容\n#用法"
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         try encoder.encode(onDisk).write(to: store.fileURL, options: .atomic)
 
         store.reloadFromDiskIfChanged()
-        XCTAssertEqual(store.note(with: note.id)?.content, "MCP 写的新内容\n#用法")
+        XCTAssertEqual(store.note(with: note.id)?.content, "CLI 写的新内容\n#用法")
     }
 
     func testNewNoteAdoptsTheExistingGroupColour() throws {

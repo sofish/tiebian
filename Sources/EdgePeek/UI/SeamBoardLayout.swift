@@ -71,13 +71,38 @@ enum AngleHash {
 }
 
 enum SeamMetrics {
-    static let depth: CGFloat = 24
-    static let lineWidth: CGFloat = 1.7
-
-    static func panelSize(edge: EdgeSide, length: CGFloat) -> CGSize {
-        edge.isVertical
+    static func panelSize(edge: EdgeSide, length: CGFloat, width: CGFloat) -> CGSize {
+        // Leave room inward for the overdue count; the outward glow meets the screen edge.
+        let depth = max(24, inset(width: width) + countOffset(width: width) + 10)
+        return edge.isVertical
             ? CGSize(width: depth, height: length)
             : CGSize(width: length, height: depth)
+    }
+
+    static func dotWidth(width: CGFloat, hasDue: Bool) -> CGFloat {
+        width / SeamSizing.minimumWidth * (hasDue ? 5.2 : 3.6)
+    }
+
+    static func cometWidth(width: CGFloat, hasDue: Bool) -> CGFloat {
+        width / SeamSizing.minimumWidth * (hasDue ? 4.2 : 3.1)
+    }
+
+    static func inset(width: CGFloat) -> CGFloat {
+        width / 2
+    }
+
+    static func countOffset(width: CGFloat) -> CGFloat {
+        max(9, dotWidth(width: width, hasDue: true) / 2 + 6)
+    }
+
+    static func lineCenter(edge: EdgeSide, size: CGSize, width: CGFloat) -> CGPoint {
+        let offset = inset(width: width)
+        switch edge {
+        case .left: return CGPoint(x: offset, y: size.height / 2)
+        case .right: return CGPoint(x: size.width - offset, y: size.height / 2)
+        case .top: return CGPoint(x: size.width / 2, y: offset)
+        case .bottom: return CGPoint(x: size.width / 2, y: size.height - offset)
+        }
     }
 }
 

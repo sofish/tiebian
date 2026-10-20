@@ -11,7 +11,7 @@ final class BackgroundHoverTests: XCTestCase {
         let name = "EdgePeekResizeTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
-        let preference = SeamSizePreference(defaults: defaults)
+        let preference = SeamPreferences(defaults: defaults)
         preference.length = 10_000
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(name)
@@ -32,7 +32,60 @@ final class BackgroundHoverTests: XCTestCase {
         // EdgeGeometry rounds the complete frame out to integral screen points.
         XCTAssertEqual(edge.isVertical ? seam.frame.height : seam.frame.width, 220, accuracy: 1)
         controller.setSeamLength(SeamSizing.defaultLength)
-        XCTAssertEqual(SeamSizePreference(defaults: defaults).length, 440)
+        XCTAssertEqual(SeamPreferences(defaults: defaults).length, 440)
+        controller.setSeamWidth(SeamSizing.widthRange.upperBound)
+        XCTAssertEqual(controller.seamState.width, SeamSizing.widthRange.upperBound)
+        let expected = SeamMetrics.panelSize(edge: edge, length: controller.seamLength,
+                                            width: controller.seamWidth)
+        XCTAssertEqual(seam.frame.width, expected.width, accuracy: 1)
+        XCTAssertEqual(seam.frame.height, expected.height, accuracy: 1)
+        XCTAssertEqual(SeamPreferences(defaults: defaults).width, controller.seamWidth)
+    }
+
+    func testManualAllNotesStaysOpenAwayFromEdgeAndTogglesWithoutActivating() async throws {
+        _ = NSApplication.shared
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EdgePeekAllNotesTests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = NoteStore(fileURL: directory.appendingPathComponent("notes.json"), seedIfMissing: false)
+        store.addNote(content: "一\n#工作")
+        store.addNote(content: "二\n#灵感")
+        let controller = EdgeController(store: store, mouseLocation: { CGPoint(x: 100_000, y: 100_000) })
+        defer { controller.shutdown() }
+        controller.createNote()
+        let draftID = try XCTUnwrap(controller.editor.editingNoteID)
+        NSApp.deactivate()
+        controller.toggleAllNotes()
+        XCTAssertFalse(controller.editor.isOpen)
+        XCTAssertNil(store.note(with: draftID))
+        XCTAssertTrue(controller.seamState.isBoardOpen)
+        try await Task.sleep(for: .milliseconds(650))
+        XCTAssertTrue(controller.seamState.isBoardOpen)
+        XCTAssertFalse(NSApp.isActive)
+        controller.toggleAllNotes()
+        XCTAssertFalse(controller.seamState.isBoardOpen)
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertFalse(controller.seamState.isBoardOpen)
+    }
+
+    func testGlintAndCountHaveRoomAtEveryWidthAndEdge() {
+        for edge in EdgeSide.allCases {
+            for width in [SeamSizing.minimumWidth, SeamSizing.defaultWidth, SeamSizing.widthRange.upperBound] {
+                let size = SeamMetrics.panelSize(edge: edge, length: 440, width: width)
+                let center = SeamMetrics.lineCenter(edge: edge, size: size, width: width)
+                let inset = edge.isVertical ? center.x : center.y
+                let depth = edge.isVertical ? size.width : size.height
+                let radius = SeamMetrics.dotWidth(width: width, hasDue: true) / 2
+                let outward = edge == .left || edge == .top ? inset : depth - inset
+                XCTAssertEqual(outward - width / 2, 0, accuracy: 0.001)
+                // The glint deliberately reaches beyond the panel toward the physical edge.
+                XCTAssertLessThanOrEqual(outward - radius, 0)
+                XCTAssertLessThanOrEqual(outward + radius, depth + 0.001)
+                XCTAssertGreaterThanOrEqual(depth, 24)
+                XCTAssertLessThanOrEqual(radius, SeamMetrics.countOffset(width: width))
+            }
+        }
+        XCTAssertEqual(SeamMetrics.cometWidth(width: SeamSizing.defaultWidth, hasDue: false), 6.2)
     }
 
     func testInactiveAppOpensOnFirstHoverAndClosesAfterLeaving() async throws {

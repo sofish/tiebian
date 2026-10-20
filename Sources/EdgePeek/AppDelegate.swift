@@ -8,8 +8,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var controller: EdgeController!
     private var statusItem: NSStatusItem!
     private var hotKey: GlobalHotKey?
+    private var allNotesHotKey: GlobalHotKey?
     private var launchAtLoginItem: NSMenuItem?
     private var seamSizeView: SeamSizeMenuView?
+    private var seamWidthView: SeamSizeMenuView?
+    private var animationMenu: NSMenu?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppFonts.register()
@@ -30,6 +33,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if hotKey == nil {
             NSLog("EdgePeek: ⌘⇧Space is already owned by another app.")
+        }
+        allNotesHotKey = GlobalHotKey(shortcut: .allNotes) { [weak self] in
+            self?.controller.toggleAllNotes()
+        }
+        if allNotesHotKey == nil {
+            NSLog("EdgePeek: ⌃⌥Space is already owned by another app.")
         }
     }
 
@@ -67,6 +76,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         newItem.keyEquivalentModifierMask = [.command, .shift]
         newItem.target = self
         menu.addItem(newItem)
+        menu.addItem(makeAllNotesItem())
 
         menu.addItem(.separator())
 
@@ -81,6 +91,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         seamSizeView = sizeView
         sliderItem.view = sizeView
         sizeMenu.addItem(sliderItem)
+        let widthItem = NSMenuItem()
+        let widthView = SeamSizeMenuView(dimension: .width)
+        widthView.onChange = { [weak self] width in self?.controller?.setSeamWidth(width) }
+        seamWidthView = widthView
+        widthItem.view = widthView
+        sizeMenu.addItem(widthItem)
         let resetSize = NSMenuItem(title: "恢复默认尺寸（2 倍）",
                                   action: #selector(resetSeamSize), keyEquivalent: "")
         resetSize.target = self
@@ -88,9 +104,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sizeItem.submenu = sizeMenu
         menu.addItem(sizeItem)
 
-        let mcpItem = NSMenuItem(title: "本地 MCP…", action: #selector(showMCPInfo), keyEquivalent: "")
-        mcpItem.target = self
-        menu.addItem(mcpItem)
+        let animationItem = NSMenuItem(title: "光条动画", action: nil, keyEquivalent: "")
+        let animationMenu = NSMenu(title: "光条动画")
+        animationMenu.delegate = self
+        for animation in SeamAnimation.allCases {
+            let item = NSMenuItem(title: animation.title, action: #selector(selectSeamAnimation(_:)), keyEquivalent: "")
+            item.representedObject = animation.rawValue
+            item.target = self
+            animationMenu.addItem(item)
+        }
+        self.animationMenu = animationMenu
+        animationItem.submenu = animationMenu
+        menu.addItem(animationItem)
+
+        let skillItem = NSMenuItem(title: "安装 Skill…", action: #selector(showSkillInfo), keyEquivalent: "")
+        skillItem.target = self
+        menu.addItem(skillItem)
 
         let revealItem = NSMenuItem(
             title: "便签存放位置",
@@ -145,8 +174,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         if let controller {
             seamSizeView?.update(value: controller.seamLength, range: controller.seamLengthRange)
+            seamWidthView?.update(value: controller.seamWidth, range: SeamSizing.widthRange)
         }
         updateStartupMenu(status: LaunchAtLogin.status)
+        let selected = controller?.seamState.animation ?? .flow
+        for item in animationMenu?.items ?? [] {
+            item.state = item.representedObject as? String == selected.rawValue ? .on : .off
+        }
     }
 
     // MARK: - Main menu
@@ -172,6 +206,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         )
         newItem.target = self
         appMenu.addItem(newItem)
+        appMenu.addItem(makeAllNotesItem())
 
         appMenu.addItem(.separator())
         let quitItem = NSMenuItem(
@@ -205,6 +240,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controller.createNote()
     }
 
+    private func makeAllNotesItem() -> NSMenuItem {
+        let item = NSMenuItem(title: "显示 / 收起全部便签", action: #selector(toggleAllNotes), keyEquivalent: " ")
+        item.keyEquivalentModifierMask = [.control, .option]
+        item.target = self
+        return item
+    }
+
+    @objc private func toggleAllNotes() {
+        controller.toggleAllNotes()
+    }
+
     @objc private func revealNotes() {
         controller.revealNotesFile()
     }
@@ -215,30 +261,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func resetSeamSize() {
         controller.setSeamLength(SeamSizing.defaultLength)
+        controller.setSeamWidth(SeamSizing.defaultWidth)
     }
 
-    func makeMCPAlert(configuration: MCPConfiguration = .bundled) -> NSAlert {
+    @objc private func selectSeamAnimation(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let animation = SeamAnimation(rawValue: raw) else { return }
+        controller?.setSeamAnimation(animation)
+    }
+
+    func makeSkillAlert(configuration: SkillConfiguration = .bundled) -> NSAlert {
         let alert = NSAlert()
         alert.alertStyle = .informational
-        alert.messageText = "让 Agent 连接贴边"
+        alert.messageText = "让 Agent 使用贴边"
         alert.informativeText = """
-        复制 Prompt，发给你正在使用的 Agent，它会完成本地 MCP 配置。
+        复制 Prompt，发给你正在使用的 Agent，它会安装贴边 Skill。
 
         当前安装位置：
         \(configuration.appURL.path)
 
         移动或重命名 App 后，请重新复制 Prompt。便签只在本机读写。
-        \(configuration.isAvailable ? "" : "\n应用内缺少 MCP 服务，请重新安装完整的贴边 App。")
+        \(configuration.isAvailable ? "" : "\n应用内缺少 Skill 或命令行工具，请重新安装完整的贴边 App。")
         """
         alert.addButton(withTitle: "复制 Prompt").isEnabled = configuration.isAvailable
         alert.addButton(withTitle: "关闭").keyEquivalent = "\u{1b}"
         return alert
     }
 
-    @objc private func showMCPInfo() {
+    @objc private func showSkillInfo() {
         NSApp.activate(ignoringOtherApps: true)
-        let configuration = MCPConfiguration.bundled
-        guard makeMCPAlert(configuration: configuration).runModal() == .alertFirstButtonReturn else { return }
+        let configuration = SkillConfiguration.bundled
+        guard makeSkillAlert(configuration: configuration).runModal() == .alertFirstButtonReturn else { return }
         do {
             copyToPasteboard(try configuration.installationPrompt())
         } catch {

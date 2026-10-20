@@ -6,7 +6,7 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [
         .executable(name: "EdgePeek", targets: ["EdgePeek"]),
-        .executable(name: "edgepeek-mcp", targets: ["EdgePeekMCP"])
+        .executable(name: "edgepeek-cli", targets: ["EdgePeekCLI"])
     ],
     targets: [
         .target(
@@ -23,9 +23,9 @@ let package = Package(
             ]
         ),
         .executableTarget(
-            name: "EdgePeekMCP",
+            name: "EdgePeekCLI",
             dependencies: ["EdgePeekCore"],
-            path: "Sources/EdgePeekMCP"
+            path: "Sources/EdgePeekCLI"
         ),
         .testTarget(
             name: "EdgePeekCoreTests",

@@ -25,19 +25,24 @@ class ReleaseTests(unittest.TestCase):
             resources = root / "resources"
             binaries.mkdir()
             resources.mkdir()
-            for name in ["EdgePeek", "edgepeek-mcp"]:
+            for name in ["EdgePeek", "edgepeek-cli"]:
                 (binaries / name).write_bytes(name.encode())
             for name in ["AppIcon.icns", "KingHwaOldSong.ttf", "KingHwaOldSong-LICENSE.txt"]:
                 (resources / name).write_bytes(name.encode())
             (resources / "not-for-distribution.secret").write_text("do not copy")
             (resources / "Info.plist").write_bytes(plistlib.dumps({"CFBundleShortVersionString": "1.1.0"}))
+            skill = resources / "Skills/edgepeek/SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text("bundled skill")
             app = root / "贴边.app"
             populate_bundle(app, binaries, resources, "abc123", False)
             info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
             self.assertEqual(info["EdgePeekSourceCommit"], "abc123")
             self.assertFalse(info["EdgePeekSourceDirty"])
-            self.assertEqual((app / "Contents/MacOS/edgepeek-mcp").read_bytes(), b"edgepeek-mcp")
-            self.assertEqual(len(list((app / "Contents/Resources").iterdir())), 3)
+            self.assertEqual((app / "Contents/MacOS/edgepeek-cli").read_bytes(), b"edgepeek-cli")
+            self.assertEqual((app / "Contents/Resources/Skills/edgepeek/SKILL.md").read_text(), "bundled skill")
+            self.assertFalse((app / "Contents/MacOS/edgepeek-mcp").exists())
+            self.assertEqual(len(list((app / "Contents/Resources").iterdir())), 4)
             self.assertFalse((app / "Contents/Resources/not-for-distribution.secret").exists())
 
     def test_published_primary_is_required_and_live_head_is_parsed(self):

@@ -6,6 +6,8 @@ struct BoardActions {
     var toggleNotePin: (UUID) -> Void = { _ in }
     var setNoteDueDate: (UUID, Date?) -> Void = { _, _ in }
     var newNote: () -> Void = {}
+    var cardDragBegan: (UUID) -> Void = { _ in }
+    var cardDragEnded: (UUID, CGPoint, Bool) -> Void = { _, _, _ in }
 }
 
 struct GroupBoardView: View {
@@ -137,7 +139,9 @@ struct GroupBoardView: View {
             },
             onOpen: { actions.openNote(card.note.id) },
             onTogglePin: { actions.toggleNotePin(card.note.id) },
-            onSetDue: { actions.setNoteDueDate(card.note.id, $0) }
+            onSetDue: { actions.setNoteDueDate(card.note.id, $0) },
+            onDragBegan: { actions.cardDragBegan(card.note.id) },
+            onDragEnded: { actions.cardDragEnded(card.note.id, $0, $1) }
         )
         .position(
             x: card.frame.midX,

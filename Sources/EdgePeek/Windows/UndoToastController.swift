@@ -9,6 +9,16 @@ final class UndoToastController {
     private var note: StickyNote?
     private var undoHandler: ((StickyNote) -> Void)?
 
+    func delete(_ note: StickyNote, from store: NoteStore, on screen: NSScreen?) {
+        store.delete(id: note.id)
+        store.saveNow()
+        guard let screen else { return }
+        show(note: note, on: screen) { [weak store] restored in
+            store?.restore(restored)
+            store?.saveNow()
+        }
+    }
+
     func show(
         note: StickyNote,
         on screen: NSScreen,

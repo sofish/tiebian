@@ -10,6 +10,8 @@ struct NoteCardView: View {
     let onOpen: () -> Void
     let onTogglePin: () -> Void
     let onSetDue: (Date?) -> Void
+    let onDragBegan: () -> Void
+    let onDragEnded: (CGPoint, Bool) -> Void
 
     private var title: String {
         let value = note.displayTitle
@@ -23,21 +25,26 @@ struct NoteCardView: View {
     }
 
     var body: some View {
-        Button(action: onOpen) {
-            card
-                .frame(width: BoardMetrics.cardWidth, height: BoardMetrics.cardHeight)
-                .rotationEffect(.degrees(isHovered ? 0 : angle), anchor: .center)
-                .scaleEffect(isHovered ? 1.018 : 1)
-                .shadow(
-                    color: Theme.shadow.opacity(isHovered ? 0.20 : 0.09),
-                    radius: isHovered ? 13 : 6,
-                    y: isHovered ? 7 : 3
-                )
-                .contentShape(Rectangle())
+        card
+        .frame(width: BoardMetrics.cardWidth, height: BoardMetrics.cardHeight)
+        .rotationEffect(.degrees(isHovered ? 0 : angle), anchor: .center)
+        .scaleEffect(isHovered ? 1.018 : 1)
+        .shadow(
+            color: Theme.shadow.opacity(isHovered ? 0.20 : 0.09),
+            radius: isHovered ? 13 : 6,
+            y: isHovered ? 7 : 3
+        )
+        .contentShape(Rectangle())
+        .overlay {
+            NoteCardDragSurface(noteID: note.id,
+                                image: { ImageRenderer(content: card).nsImage },
+                                onOpen: onOpen, onDragBegan: onDragBegan, onDragEnded: onDragEnded)
         }
-        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { onOpen() }
         .onHover(perform: onHover)
-        .help(note.plainText.isEmpty ? "空白便签" : note.plainText)
+        .help("点击编辑；拖出便签板后松手删除，可撤销。\n" + note.plainText)
         .contextMenu {
             Button(action: onOpen) {
                 Label("编辑便签", systemImage: "square.and.pencil")

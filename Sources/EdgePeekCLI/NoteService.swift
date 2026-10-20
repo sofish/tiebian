@@ -1,3 +1,4 @@
+import Darwin
 import EdgePeekCore
 import Foundation
 
@@ -13,7 +14,7 @@ struct DueUpdate {
     }
 }
 
-/// The MCP process is a second, headless client of the same JSON file the app
+/// The CLI is a second, headless client of the same JSON file the app
 /// uses. Reads and writes are deliberately plain and atomic so the running app
 /// can pick them up with its file watcher.
 struct NoteService {
@@ -42,7 +43,7 @@ struct NoteService {
         return try decoder.decode([StickyNote].self, from: data)
     }
 
-    func save(_ notes: [StickyNote]) throws {
+    private func save(_ notes: [StickyNote]) throws {
         try FileManager.default.createDirectory(
             at: fileURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -127,20 +128,23 @@ struct NoteService {
         dueAt: Date? = nil,
         pinned: Bool = false
     ) throws -> StickyNote {
-        var notes = try load()
-        let now = Date()
-        let note = StickyNote(
-            content: content,
-            color: chooseColor(for: content, in: notes),
-            isPinned: pinned,
-            createdAt: now,
-            updatedAt: now,
-            dueAt: dueAt
-        )
-        notes.insert(note, at: 0)
-        synchronizeTagColors(&notes)
-        try save(notes)
-        return notes.first { $0.id == note.id } ?? note
+        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ServiceError.invalidArguments("`content` must contain non-whitespace text.")
+        }
+        return try mutate { notes in
+            let now = Date()
+            let note = StickyNote(
+                content: content,
+                color: chooseColor(for: content, in: notes),
+                isPinned: pinned,
+                createdAt: now,
+                updatedAt: now,
+                dueAt: dueAt
+            )
+            notes.insert(note, at: 0)
+            synchronizeTagColors(&notes)
+            return notes.first { $0.id == note.id } ?? note
+        }
     }
 
     @discardableResult
@@ -150,35 +154,51 @@ struct NoteService {
         pinned: Bool? = nil,
         due: DueUpdate = .unchanged
     ) throws -> StickyNote {
-        var notes = try load()
-        guard let index = notes.firstIndex(where: { $0.id == id }) else {
-            throw ServiceError.noteNotFound
-        }
+        return try mutate { notes in
+            guard let index = notes.firstIndex(where: { $0.id == id }) else {
+                throw ServiceError.noteNotFound
+            }
 
-        if let content {
-            notes[index].content = content
+            if let content {
+                notes[index].content = content
+            }
+            if let pinned {
+                notes[index].isPinned = pinned
+            }
+            if due.isSet {
+                notes[index].dueAt = due.value
+            }
+            notes[index].updatedAt = Date()
+            synchronizeTagColors(&notes)
+            return notes[index]
         }
-        if let pinned {
-            notes[index].isPinned = pinned
-        }
-        if due.isSet {
-            notes[index].dueAt = due.value
-        }
-        notes[index].updatedAt = Date()
-        synchronizeTagColors(&notes)
-        try save(notes)
-        return notes[index]
     }
 
     @discardableResult
     func delete(id: UUID) throws -> StickyNote {
-        var notes = try load()
-        guard let index = notes.firstIndex(where: { $0.id == id }) else {
-            throw ServiceError.noteNotFound
+        return try mutate { notes in
+            guard let index = notes.firstIndex(where: { $0.id == id }) else {
+                throw ServiceError.noteNotFound
+            }
+            return notes.remove(at: index)
         }
-        let deleted = notes.remove(at: index)
+    }
+
+    private func mutate<T>(_ change: (inout [StickyNote]) throws -> T) throws -> T {
+        try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        // Atomic replacement changes the JSON inode, so lock a stable sidecar instead.
+        let descriptor = open(fileURL.appendingPathExtension("lock").path, O_CREAT | O_RDWR, 0o600)
+        guard descriptor >= 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+        defer { close(descriptor) }
+        guard flock(descriptor, LOCK_EX) == 0 else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
+        defer { flock(descriptor, LOCK_UN) }
+        var notes = try load()
+        let result = try change(&notes)
         try save(notes)
-        return deleted
+        return result
     }
 
     // MARK: - Colour rules shared with the app

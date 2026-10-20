@@ -5,6 +5,26 @@ import EdgePeekCore
 
 @MainActor
 final class NoteEditorInteractionTests: XCTestCase {
+    func testNewEditorDiscardsOnlyTrimmedEmptyContentBeforeSaving() throws {
+        _ = NSApplication.shared
+        let screen = try XCTUnwrap(NSScreen.main)
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EdgePeekEmptyEditorTests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = NoteStore(fileURL: directory.appendingPathComponent("notes.json"), seedIfMissing: false)
+        let controller = NoteEditorController()
+        defer { controller.close(restoreFocus: false) }
+        for content in ["", " \n\t", "#标签", "有内容"] {
+            let note = store.addNote()
+            controller.open(note: note, isNew: true, store: store, on: screen) {}
+            store.updateContent(id: note.id, content: content)
+            controller.close(restoreFocus: false)
+            let expected: String? = content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : content
+            XCTAssertEqual(store.note(with: note.id)?.content, expected)
+            XCTAssertEqual(NoteStore(fileURL: store.fileURL, seedIfMissing: false).note(with: note.id)?.content, expected)
+        }
+    }
+
     func testExplicitDeleteAndUndoPersistThroughFileReload() throws {
         _ = NSApplication.shared
         let screen = try XCTUnwrap(NSScreen.main)
@@ -20,7 +40,7 @@ final class NoteEditorInteractionTests: XCTestCase {
             let note = store.addNote(content: content, color: .rose)
             store.saveNow()
             var dismissed = false
-            controller.open(note: note, isNew: true, store: store, on: screen) {
+            controller.open(note: note, isNew: false, store: store, on: screen) {
                 dismissed = true
             }
             let host = try XCTUnwrap(NSApp.windows.compactMap {

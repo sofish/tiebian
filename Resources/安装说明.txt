@@ -5,9 +5,12 @@
 1. 把「贴边.app」拖到 Applications（应用程序）。
 2. 从应用程序打开贴边；它住在菜单栏里，不显示 Dock 图标。
 3. 鼠标移到屏幕边缘的光条，便签就会展开。⌘ ⇧ Space 随时记一笔。
-4. 菜单栏可调光条大小、设置登录启动；「本地 MCP…」中的「复制 Prompt」可让你的 Agent 帮你连接本地便签。
+4. 菜单栏可调光条大小、设置登录启动；「安装 Skill…」中的「复制 Prompt」可让你的 Agent 安装本地便签 Skill。
 
-如果把 App 放在其他本机文件夹，也可以直接打开。移动或重命名 App 后，请重新复制 MCP Prompt，更新客户端配置。
+如果把 App 放在其他本机文件夹，也可以直接打开。移动或重命名 App 后，请重新复制 Prompt，更新 Skill 的 App 路径。
 
 支持 macOS 14 及以上，适用于 Apple Silicon 与 Intel Mac。
 便签保存在 ~/Library/Application Support/EdgePeek/notes.json；更新 App 不会删除便签。
+
+快捷键：⌘⇧Space 新建便签；⌃⌥Space 显示 / 收起全部便签。
+新建空白便签不会保存；便签板上的单张卡片拖出后松手可删除，6 秒内可撤销。

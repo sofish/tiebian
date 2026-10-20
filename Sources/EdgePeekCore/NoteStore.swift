@@ -8,6 +8,8 @@ public final class NoteStore: ObservableObject {
     public let fileURL: URL
     public let seedIfMissing: Bool
     private var saveTask: Task<Void, Never>?
+    private var draftIDs = Set<UUID>()
+    private var lastKnownData: Data?
 
     public init(fileURL: URL? = nil, seedIfMissing: Bool = true) {
         self.fileURL = fileURL ?? Self.defaultFileURL()
@@ -57,6 +59,18 @@ public final class NoteStore: ObservableObject {
         notes[index].updatedAt = Date()
         synchronizeTagColors()
         scheduleSave()
+    }
+
+    public func beginDraft(id: UUID) {
+        guard note(with: id) != nil else { return }
+        draftIDs.insert(id)
+    }
+
+    public func finishDraft(id: UUID) {
+        guard draftIDs.contains(id) else { return }
+        discardIfEmpty(id: id)
+        draftIDs.remove(id)
+        saveNow()
     }
 
     /// Colours are a property of the paper, not a preference. New notes pick a
@@ -154,6 +168,7 @@ public final class NoteStore: ObservableObject {
 
     public func delete(id: UUID) {
         guard notes.contains(where: { $0.id == id }) else { return }
+        draftIDs.remove(id)
         notes.removeAll { $0.id == id }
         scheduleSave()
     }
@@ -171,26 +186,26 @@ public final class NoteStore: ObservableObject {
         delete(id: id)
     }
 
-    public func discardIfEmptyIgnoringTags(id: UUID) {
-        guard let note = note(with: id), note.isEmptyIgnoringTags else { return }
-        delete(id: id)
-    }
-
-    /// Called by the app's file watcher when the headless MCP server (or a
-    /// person editing the JSON) has changed the shared file. Equality keeps
-    /// the app's own atomic saves from causing an unnecessary reload.
+    /// Preserve open drafts when another local client changes the shared file.
+    /// Comparing bytes also avoids reloading our own saves after ISO-8601 dates
+    /// have lost their subsecond precision.
     public func reloadFromDiskIfChanged() {
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
         do {
             let data = try Data(contentsOf: fileURL)
+            guard data != lastKnownData else { return }
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             let fresh = try decoder.decode([StickyNote].self, from: data)
-            guard fresh != notes else { return }
+            lastKnownData = data
+            let drafts = notes.filter { draftIDs.contains($0.id) }
+            let merged = drafts + fresh.filter { !draftIDs.contains($0.id) }
+            guard merged != notes else { return }
             saveTask?.cancel()
             saveTask = nil
-            notes = fresh
+            notes = merged
             synchronizeTagColors()
+            if !drafts.isEmpty { scheduleSave() }
         } catch {
             NSLog("EdgePeek: could not reload externally changed notes: \(error.localizedDescription)")
         }
@@ -208,8 +223,10 @@ public final class NoteStore: ObservableObject {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             encoder.dateEncodingStrategy = .iso8601
-            let data = try encoder.encode(notes)
+            let persisted = notes.filter { !draftIDs.contains($0.id) || !$0.isEmpty }
+            let data = try encoder.encode(persisted)
             try data.write(to: fileURL, options: .atomic)
+            lastKnownData = data
         } catch {
             NSLog("EdgePeek: could not save notes: \(error.localizedDescription)")
         }
@@ -269,6 +286,7 @@ public final class NoteStore: ObservableObject {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             notes = try decoder.decode([StickyNote].self, from: data)
+            lastKnownData = data
             synchronizeTagColors()
         } catch {
             NSLog("EdgePeek: could not read notes: \(error.localizedDescription)")
@@ -311,7 +329,7 @@ public final class NoteStore: ObservableObject {
                 updatedAt: now.addingTimeInterval(-60)
             ),
             StickyNote(
-                content: "随时记一笔\n按 ⌘ ⇧ Space 新建便签。\n第一行会变成卡片上的标题。\n#快捷键",
+                content: "随时记一笔\n按 ⌘ ⇧ Space 新建便签。\n按 ⌃ ⌥ Space 显示或收起全部便签。\n第一行会变成卡片上的标题。\n#快捷键",
                 color: .sky,
                 createdAt: now.addingTimeInterval(-120),
                 updatedAt: now.addingTimeInterval(-120)

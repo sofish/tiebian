@@ -40,6 +40,7 @@ final class NoteEditorController {
             close(restoreFocus: false, callDismiss: false)
         }
         undoToast.hide(immediately: true)
+        if isNew { store.beginDraft(id: note.id) }
 
         if previousApp == nil {
             let front = NSWorkspace.shared.frontmostApplication
@@ -107,9 +108,10 @@ final class NoteEditorController {
     func close(restoreFocus: Bool = true, callDismiss: Bool = true) {
         guard let panel, let noteID else { return }
 
-        store?.saveNow()
         if isNew {
-            store?.discardIfEmptyIgnoringTags(id: noteID)
+            store?.finishDraft(id: noteID)
+        } else {
+            store?.saveNow()
         }
 
         let dismiss = onDismiss
@@ -135,20 +137,16 @@ final class NoteEditorController {
             close(restoreFocus: false, callDismiss: true)
             return
         }
+        if isNew, note.isEmpty {
+            close(restoreFocus: false)
+            return
+        }
 
         let screen = panel.screen ?? screen ?? NSScreen.main
         let dismiss = onDismiss
         tearDownPanel(panel)
-        store.delete(id: note.id)
-        store.saveNow()
+        undoToast.delete(note, from: store, on: screen)
         dismiss?()
-
-        if let screen {
-            undoToast.show(note: note, on: screen) { [weak store] restored in
-                store?.restore(restored)
-                store?.saveNow()
-            }
-        }
     }
 
     private func tearDownPanel(_ panel: NSPanel) {

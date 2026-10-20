@@ -19,6 +19,9 @@ final class EdgeController: NSObject {
     private var boardPanel: NSPanel?
     private var boardHost: NSHostingView<AnyView>?
     private var boardVisible = false
+    private var boardHeldOpen = false
+    private var draggedCardID: UUID?
+    private let cardUndoToast = UndoToastController()
     private var boardLayout: GroupBoardLayout?
 
     private var previewPanel: NSPanel?
@@ -30,7 +33,7 @@ final class EdgeController: NSObject {
     private var mouseTimer: Timer?
     private var globalMouseMonitor: Any?
     private let mouseLocation: () -> CGPoint
-    private let sizePreference: SeamSizePreference
+    private let sizePreference: SeamPreferences
     private var dueTimer: Timer?
     private var keyMonitor: Any?
     private var dragGlow: EdgeGlowWindow?
@@ -54,7 +57,7 @@ final class EdgeController: NSObject {
     init(
         store: NoteStore,
         mouseLocation: @escaping () -> CGPoint = { NSEvent.mouseLocation },
-        sizePreference: SeamSizePreference = SeamSizePreference()
+        sizePreference: SeamPreferences = SeamPreferences()
     ) {
         self.store = store
         self.mouseLocation = mouseLocation
@@ -97,6 +100,8 @@ final class EdgeController: NSObject {
         entities = GroupDataSource.entities(for: store)
         lastOverdueIDs = Set(store.overdueNotes.map(\.id))
         seamState.edge = anchor.edge
+        seamState.width = sizePreference.width
+        seamState.animation = sizePreference.animation
         seamState.hasDueNote = !lastOverdueIDs.isEmpty
         seamState.overdueCount = lastOverdueIDs.count
 
@@ -137,6 +142,37 @@ final class EdgeController: NSObject {
         closeBoard(animated: false)
         hidePreview(immediately: true)
         refreshSeam(reposition: true, animated: false)
+    }
+
+    var seamWidth: Double { sizePreference.width }
+
+    func setSeamAnimation(_ animation: SeamAnimation) {
+        guard animation != sizePreference.animation else { return }
+        sizePreference.animation = animation
+        seamState.animation = animation
+    }
+
+    func setSeamWidth(_ width: Double) {
+        guard width.isFinite else { return }
+        let requested = SeamSizing.width(width)
+        guard requested != seamWidth else { return }
+        sizePreference.width = requested
+        seamState.width = requested
+        closeBoard(animated: false)
+        hidePreview(immediately: true)
+        refreshSeam(reposition: true, animated: false)
+    }
+
+    func toggleAllNotes() {
+        if boardVisible, boardHeldOpen {
+            closeBoard(animated: true)
+            ignoreHoverUntilExit = true
+            return
+        }
+        editor.close(restoreFocus: false)
+        cancelClose()
+        showBoard()
+        boardHeldOpen = boardVisible
     }
 
     func createNote() {
@@ -198,6 +234,7 @@ final class EdgeController: NSObject {
         hidePreview(immediately: true)
         closeBoard(animated: false)
         editor.close(restoreFocus: false, callDismiss: false)
+        cardUndoToast.hide(immediately: true)
         store.saveNow()
         seamPanel?.orderOut(nil)
         notesFileWatcher?.stop()
@@ -211,7 +248,7 @@ final class EdgeController: NSObject {
     // MARK: - Setup
 
     private func buildSeam() {
-        let size = SeamMetrics.panelSize(edge: anchor.edge, length: seamLength)
+        let size = SeamMetrics.panelSize(edge: anchor.edge, length: seamLength, width: seamWidth)
         let frame = seamFrame(for: anchor, screen: currentScreen)
         let panel = PanelFactory.make(frame: frame, keyable: false)
         panel.hasShadow = false
@@ -291,6 +328,11 @@ final class EdgeController: NSObject {
 
             if event.keyCode == 53, self.editor.isOpen {
                 self.editor.close()
+                return nil
+            }
+            if event.keyCode == 53, self.boardVisible {
+                self.closeBoard(animated: true)
+                self.ignoreHoverUntilExit = true
                 return nil
             }
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
@@ -381,7 +423,7 @@ final class EdgeController: NSObject {
             }
         }
 
-        let size = SeamMetrics.panelSize(edge: newAnchor.edge, length: seamLength)
+        let size = SeamMetrics.panelSize(edge: newAnchor.edge, length: seamLength, width: seamWidth)
         let target = EdgeGeometry.frame(
             for: newAnchor,
             size: size,
@@ -508,11 +550,11 @@ final class EdgeController: NSObject {
     }
 
     private func scheduleClose(after delay: TimeInterval) {
-        guard boardVisible, closeWork == nil else { return }
+        guard boardVisible, !boardHeldOpen, draggedCardID == nil, closeWork == nil else { return }
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.closeWork = nil
-            guard self.boardVisible else { return }
+            guard self.boardVisible, !self.boardHeldOpen, self.draggedCardID == nil else { return }
             let mouse = self.currentMouseLocation()
             let insideSeam = self.seamPanel.frame.insetBy(dx: -6, dy: -6).contains(mouse)
             let insideBoard = self.boardPanel?.frame.insetBy(dx: -6, dy: -6).contains(mouse) ?? false
@@ -591,6 +633,8 @@ final class EdgeController: NSObject {
     }
 
     private func closeBoard(animated: Bool) {
+        boardHeldOpen = false
+        draggedCardID = nil
         cancelOpen()
         cancelClose()
         hidePreview(immediately: true)
@@ -673,8 +717,28 @@ final class EdgeController: NSObject {
                 self?.store.setDueDate(id: id, dueAt: due)
                 self?.updateDueState(rebuildBoard: true)
             },
-            newNote: { [weak self] in self?.createNote() }
+            newNote: { [weak self] in self?.createNote() },
+            cardDragBegan: { [weak self] in self?.cardDragBegan(noteID: $0) },
+            cardDragEnded: { [weak self] in self?.cardDragEnded(noteID: $0, at: $1, cancelled: $2) }
         )
+    }
+
+    func cardDragBegan(noteID: UUID) {
+        guard boardVisible, store.note(with: noteID) != nil else { return }
+        draggedCardID = noteID
+        cancelClose()
+        hidePreview(immediately: true)
+    }
+
+    func cardDragEnded(noteID: UUID, at point: CGPoint, cancelled: Bool) {
+        guard draggedCardID == noteID else { return }
+        draggedCardID = nil
+        if !cancelled, boardVisible, let frame = boardPanel?.frame,
+           !frame.insetBy(dx: -24, dy: -24).contains(point),
+           let note = store.note(with: noteID) {
+            cardUndoToast.delete(note, from: store, on: currentScreen)
+        }
+        if !isMouseInsideBoard(), !isMouseInsideSeam() { scheduleClose(after: 0.3) }
     }
 
     private func boardFrame(size: CGSize, screen: NSScreen) -> CGRect {
@@ -956,7 +1020,8 @@ final class EdgeController: NSObject {
             size: SeamMetrics.panelSize(
                 edge: anchor.edge,
                 length: SeamSizing.length(sizePreference.length, edge: anchor.edge,
-                                          availableSize: edgeBounds(for: screen).size)
+                                          availableSize: edgeBounds(for: screen).size),
+                width: seamWidth
             ),
             in: edgeBounds(for: screen),
             inset: 0
@@ -1025,16 +1090,8 @@ final class EdgeController: NSObject {
         refreshSeam(reposition: true, animated: false)
     }
 
-    /// Physical side and bottom edges; the top stays below the menu bar.
     private func edgeBounds(for screen: NSScreen) -> CGRect {
-        let full = screen.frame
-        let visible = screen.visibleFrame
-        return CGRect(
-            x: full.minX,
-            y: full.minY,
-            width: full.width,
-            height: max(1, visible.maxY - full.minY)
-        )
+        screen.frame
     }
 
     private func screenForCurrentSeam() -> NSScreen {

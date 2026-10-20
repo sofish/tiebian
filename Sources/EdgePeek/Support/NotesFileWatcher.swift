@@ -2,7 +2,7 @@ import Darwin
 import Foundation
 
 /// Watches the folder rather than the file so an atomic replacement (the way
-/// the app and the MCP server both save) is still observed.
+/// the app and the CLI both save) is still observed.
 @MainActor
 final class NotesFileWatcher {
     private let fileURL: URL
