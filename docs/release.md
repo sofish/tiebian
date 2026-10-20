@@ -19,6 +19,8 @@ GitHub 仓库已于 2026-10-20 按用户要求设为 public，源码历史和 Re
 
 默认输出 `dist/贴边.app`，开发构建使用 ad-hoc 签名。可用 `--output` 指定其他路径，或用 `--identity` / `CODESIGN_IDENTITY` 指定证书。构建写入 `EdgePeekSourceCommit` 和 `EdgePeekSourceDirty`，签名完成后才替换旧的生成目录。
 
+用户要求安装到 `/Applications/贴边.app` 做本机验收时，同样先提交、合入并推送 origin 实际主分支，从干净且与远端主分支一致的提交构建。使用现有 Developer ID 证书和 `release --universal` 构建本机预览包，无需创建 GitHub Release；该包未经公证时仅用于本机验收，不能作为对外发布包。正常退出旧进程并保留旧 App 备份后再替换；不覆盖 Application Support 里的数据。安装后核对实际运行路径、包内源码 SHA、签名、Universal 架构和 helper，比较新旧便签文件校验值，并确认光条和动画菜单可用。
+
 图标是原生 AppKit 绘图，可复现：
 
 ```bash

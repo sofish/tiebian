@@ -79,20 +79,12 @@ enum SeamMetrics {
             : CGSize(width: length, height: depth)
     }
 
-    static func dotWidth(width: CGFloat, hasDue: Bool) -> CGFloat {
-        width / SeamSizing.minimumWidth * (hasDue ? 5.2 : 3.6)
-    }
-
-    static func cometWidth(width: CGFloat, hasDue: Bool) -> CGFloat {
-        width / SeamSizing.minimumWidth * (hasDue ? 4.2 : 3.1)
-    }
-
     static func inset(width: CGFloat) -> CGFloat {
         width / 2
     }
 
     static func countOffset(width: CGFloat) -> CGFloat {
-        max(9, dotWidth(width: width, hasDue: true) / 2 + 6)
+        max(9, width + 6)
     }
 
     static func lineCenter(edge: EdgeSide, size: CGSize, width: CGFloat) -> CGPoint {

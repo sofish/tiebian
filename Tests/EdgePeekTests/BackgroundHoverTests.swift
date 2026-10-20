@@ -68,24 +68,19 @@ final class BackgroundHoverTests: XCTestCase {
         XCTAssertFalse(controller.seamState.isBoardOpen)
     }
 
-    func testGlintAndCountHaveRoomAtEveryWidthAndEdge() {
+    func testHorizonAndCountHaveRoomAtEveryWidthAndEdge() {
         for edge in EdgeSide.allCases {
             for width in [SeamSizing.minimumWidth, SeamSizing.defaultWidth, SeamSizing.widthRange.upperBound] {
                 let size = SeamMetrics.panelSize(edge: edge, length: 440, width: width)
                 let center = SeamMetrics.lineCenter(edge: edge, size: size, width: width)
                 let inset = edge.isVertical ? center.x : center.y
                 let depth = edge.isVertical ? size.width : size.height
-                let radius = SeamMetrics.dotWidth(width: width, hasDue: true) / 2
                 let outward = edge == .left || edge == .top ? inset : depth - inset
                 XCTAssertEqual(outward - width / 2, 0, accuracy: 0.001)
-                // The glint deliberately reaches beyond the panel toward the physical edge.
-                XCTAssertLessThanOrEqual(outward - radius, 0)
-                XCTAssertLessThanOrEqual(outward + radius, depth + 0.001)
                 XCTAssertGreaterThanOrEqual(depth, 24)
-                XCTAssertLessThanOrEqual(radius, SeamMetrics.countOffset(width: width))
+                XCTAssertLessThanOrEqual(outward + SeamMetrics.countOffset(width: width) + 10, depth + 0.001)
             }
         }
-        XCTAssertEqual(SeamMetrics.cometWidth(width: SeamSizing.defaultWidth, hasDue: false), 6.2)
     }
 
     func testInactiveAppOpensOnFirstHoverAndClosesAfterLeaving() async throws {
@@ -103,6 +98,17 @@ final class BackgroundHoverTests: XCTestCase {
             ($0.contentView as? NSHostingView<SeamView>)?.rootView.state === controller.seamState
         })
         NSApp.deactivate()
+        seam.contentView?.layoutSubtreeIfNeeded()
+        let glow = try XCTUnwrap(seam.childWindows?.first { $0.ignoresMouseEvents })
+        switch controller.seamState.edge {
+        case .left: pointer = CGPoint(x: glow.frame.maxX - 8, y: seam.frame.midY)
+        case .right: pointer = CGPoint(x: glow.frame.minX + 8, y: seam.frame.midY)
+        case .top: pointer = CGPoint(x: seam.frame.midX, y: glow.frame.minY + 8)
+        case .bottom: pointer = CGPoint(x: seam.frame.midX, y: glow.frame.maxY - 8)
+        }
+        XCTAssertFalse(seam.frame.insetBy(dx: -6, dy: -6).contains(pointer))
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertFalse(controller.seamState.isBoardOpen)
         pointer = CGPoint(x: seam.frame.midX, y: seam.frame.midY)
         try await Task.sleep(for: .milliseconds(400))
         XCTAssertFalse(NSApp.isActive)

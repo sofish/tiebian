@@ -8,25 +8,133 @@ struct SeamLightConfiguration: Equatable {
     var hasDue: Bool
     var overdueCount: Int
     var animation: SeamAnimation
+
+    var cycle: CFTimeInterval {
+        switch animation {
+        case .flow: return hasDue ? 5.6 : 8.4
+        case .breathe: return hasDue ? 4.8 : 6.8
+        case .ripple: return hasDue ? 4.0 : 6.0
+        }
+    }
 }
 
+/// The light has its own click-through window so its halo can exceed the seam's
+/// hit area without covering other apps with an invisible mouse target.
 struct SeamLight: NSViewRepresentable {
     let configuration: SeamLightConfiguration
     let hovered: Bool
 
-    func makeNSView(context: Context) -> SeamLightLayerView { SeamLightLayerView() }
+    func makeNSView(context: Context) -> SeamLightHostView { SeamLightHostView() }
 
-    func updateNSView(_ view: SeamLightLayerView, context: Context) {
+    func updateNSView(_ view: SeamLightHostView, context: Context) {
         view.configure(configuration, hovered: hovered)
+    }
+
+    static func dismantleNSView(_ view: SeamLightHostView, coordinator: ()) {
+        view.detachLight()
+    }
+}
+
+final class SeamLightHostView: NSView {
+    private(set) var lightPanel: NSPanel?
+    private let light = SeamLightLayerView()
+    private var configuration: SeamLightConfiguration?
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    func configure(_ value: SeamLightConfiguration, hovered: Bool) {
+        configuration = value
+        light.configure(value, hovered: hovered)
+        updateLightFrame()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        detachLight()
+        guard let window else { return }
+        let panel = PanelFactory.make(frame: .zero, keyable: false)
+        panel.ignoresMouseEvents = true
+        panel.hasShadow = false
+        panel.level = window.level
+        panel.contentView = light
+        lightPanel = panel
+        updateLightFrame()
+        window.addChildWindow(panel, ordered: .above)
+    }
+
+    override func layout() {
+        super.layout()
+        updateLightFrame()
+    }
+
+    func detachLight() {
+        guard let panel = lightPanel else { return }
+        panel.parent?.removeChildWindow(panel)
+        panel.close()
+        lightPanel = nil
+    }
+
+    private func updateLightFrame() {
+        guard let configuration, let window, let lightPanel,
+              bounds.width > 0, bounds.height > 0 else { return }
+        let seamFrame = window.convertToScreen(convert(bounds, to: nil))
+        let frame = SeamGlowGeometry(width: configuration.width)
+            .frame(around: seamFrame, edge: configuration.edge)
+        if lightPanel.frame != frame { lightPanel.setFrame(frame, display: true) }
+        let lightFrame = CGRect(origin: .zero, size: frame.size)
+        if light.frame != lightFrame { light.frame = lightFrame }
+    }
+}
+
+struct SeamGlowGeometry {
+    let width: CGFloat
+
+    var scale: CGFloat { sqrt(width / SeamSizing.defaultWidth) }
+    var haloLength: CGFloat { 200 * scale }
+    var haloDepth: CGFloat { 96 * scale }
+    var overflow: CGFloat { ceil(haloLength / 2 + 8) }
+    var depth: CGFloat { ceil(haloDepth / 2 + 8) }
+
+    func frame(around seam: CGRect, edge: EdgeSide) -> CGRect {
+        switch edge {
+        case .left:
+            return CGRect(x: seam.minX, y: seam.minY - overflow,
+                          width: max(seam.width, depth), height: seam.height + overflow * 2)
+        case .right:
+            let depth = max(seam.width, depth)
+            return CGRect(x: seam.maxX - depth, y: seam.minY - overflow,
+                          width: depth, height: seam.height + overflow * 2)
+        case .top:
+            let depth = max(seam.height, depth)
+            return CGRect(x: seam.minX - overflow, y: seam.maxY - depth,
+                          width: seam.width + overflow * 2, height: depth)
+        case .bottom:
+            return CGRect(x: seam.minX - overflow, y: seam.minY,
+                          width: seam.width + overflow * 2, height: max(seam.height, depth))
+        }
+    }
+}
+
+private struct SeamRadiance {
+    let layer = CALayer()
+    let atmosphere = CAGradientLayer()
+    let bloom = CAGradientLayer()
+    let core = CAGradientLayer()
+    let rim = CAGradientLayer()
+
+    init() {
+        atmosphere.name = "atmosphere"
+        bloom.name = "bloom"
+        core.name = "core"
+        rim.name = "rim"
+        for band in [atmosphere, bloom, core, rim] { layer.addSublayer(band) }
     }
 }
 
 final class SeamLightLayerView: NSView {
     private let base = CAGradientLayer()
-    private let pulse = CAGradientLayer()
-    private let motion = CALayer()
-    private let comet = CAGradientLayer()
-    private let dot = CALayer()
+    private let radiance = SeamRadiance()
+    private let echo = SeamRadiance()
     private let count = CATextLayer()
     private var configuration: SeamLightConfiguration?
     private var hovered = false
@@ -35,14 +143,13 @@ final class SeamLightLayerView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.masksToBounds = true
         layer?.isGeometryFlipped = true
-        layer?.addSublayer(base)
-        layer?.addSublayer(pulse)
-        layer?.addSublayer(motion)
-        motion.addSublayer(comet)
-        motion.addSublayer(dot)
-        motion.addSublayer(count)
+        layer?.masksToBounds = true
+        base.name = "horizon"
+        radiance.layer.name = "radiance"
+        echo.layer.name = "echo"
+        count.name = "count"
+        for child in [base, radiance.layer, echo.layer, count] { layer?.addSublayer(child) }
     }
 
     required init?(coder: NSCoder) { nil }
@@ -50,6 +157,7 @@ final class SeamLightLayerView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     func configure(_ value: SeamLightConfiguration, hovered: Bool) {
+        guard configuration != value || self.hovered != hovered else { return }
         if configuration != value {
             configuration = value
             renderedSize = .zero
@@ -58,7 +166,8 @@ final class SeamLightLayerView: NSView {
         self.hovered = hovered
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        base.opacity = Float(value.hasDue ? 0.85 : (hovered ? 0.68 : 0.48))
+        if value.hasDue { base.opacity = 0.48 }
+        else { base.opacity = hovered ? 0.38 : 0.22 }
         CATransaction.commit()
     }
 
@@ -70,105 +179,71 @@ final class SeamLightLayerView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
-        for layer in [base, pulse, motion, count] { layer.removeAllAnimations() }
+        for child in [base, radiance.layer, echo.layer, count] { child.removeAllAnimations() }
 
+        let geometry = SeamGlowGeometry(width: style.width)
         let vertical = style.edge.isVertical
-        let length = max(19, vertical ? bounds.height : bounds.width)
+        let length = max(1, (vertical ? bounds.height : bounds.width) - geometry.overflow * 2)
         let center = SeamMetrics.lineCenter(edge: style.edge, size: bounds.size, width: style.width)
-        let baseSize = vertical ? CGSize(width: style.width, height: length - 18)
-            : CGSize(width: length - 18, height: style.width)
-        let baseFrame = CGRect(x: center.x - baseSize.width / 2, y: center.y - baseSize.height / 2,
-                               width: baseSize.width, height: baseSize.height)
-        let accent = NSColor(Theme.accent)
-        for light in [base, pulse, comet] {
-            light.colors = [accent.withAlphaComponent(0).cgColor, accent.withAlphaComponent(0.7).cgColor,
-                            NSColor(red: 1, green: 0.95, blue: 0.89, alpha: 0.95).cgColor,
-                            accent.withAlphaComponent(0.7).cgColor, accent.withAlphaComponent(0).cgColor]
-            light.startPoint = vertical ? CGPoint(x: 0.5, y: 0) : CGPoint(x: 0, y: 0.5)
-            light.endPoint = vertical ? CGPoint(x: 0.5, y: 1) : CGPoint(x: 1, y: 0.5)
-            light.shadowColor = accent.cgColor
-            light.shadowOpacity = style.hasDue ? 0.9 : 0.5
-            light.shadowRadius = style.hasDue ? 7 : 4
+        let baseSize = vertical ? CGSize(width: style.width, height: max(1, length - 18))
+            : CGSize(width: max(1, length - 18), height: style.width)
+        base.frame = CGRect(x: center.x - baseSize.width / 2, y: center.y - baseSize.height / 2,
+                            width: baseSize.width, height: baseSize.height)
+        base.colors = Self.colors([(.amber, 0), (.amber, 0.55), (.gold, 0.8), (.amber, 0.55), (.amber, 0)])
+        base.startPoint = vertical ? CGPoint(x: 0.5, y: 0) : CGPoint(x: 0, y: 0.5)
+        base.endPoint = vertical ? CGPoint(x: 0.5, y: 1) : CGPoint(x: 1, y: 0.5)
+        let mask = CAShapeLayer()
+        mask.path = Self.taperedPath(size: baseSize, edge: style.edge)
+        base.mask = mask
+
+        // The brightest point sits beyond the horizon. Only a soft, flattened
+        // cap is visible on screen, never a detached circular bead.
+        var horizon = center
+        switch style.edge {
+        case .left: horizon.x = 0
+        case .right: horizon.x = bounds.width
+        case .top: horizon.y = 0
+        case .bottom: horizon.y = bounds.height
         }
-        base.frame = baseFrame
-        pulse.frame = baseFrame
-        for light in [base, pulse] {
-            let mask = CAShapeLayer()
-            mask.path = Self.taperedPath(size: baseSize, edge: style.edge)
-            light.mask = mask
+        for glow in [radiance, echo] {
+            glow.layer.bounds = .zero
+            glow.layer.position = horizon
+            glow.layer.opacity = 0
+            configureGlow(glow, style: style, geometry: geometry, length: length)
         }
-        base.opacity = Float(style.hasDue ? 0.85 : (hovered ? 0.68 : 0.48))
-        pulse.isHidden = style.animation != .ripple
-        motion.isHidden = style.animation != .flow
+        echo.layer.isHidden = style.animation != .ripple
 
         switch style.animation {
-        case .breathe:
-            let breathe = CABasicAnimation(keyPath: "opacity")
-            breathe.fromValue = style.hasDue ? 0.45 : 0.18
-            breathe.toValue = style.hasDue ? 1 : 0.75
-            breathe.duration = style.hasDue ? 1.7 : 2.6
-            breathe.autoreverses = true
-            breathe.repeatCount = .infinity
-            breathe.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            base.add(breathe, forKey: "breathe")
-        case .ripple:
-            let expand = CABasicAnimation(keyPath: vertical ? "transform.scale.y" : "transform.scale.x")
-            expand.fromValue = 0.04
-            expand.toValue = 1
-            expand.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            let wave = CAAnimationGroup()
-            wave.duration = style.hasDue ? 2.6 : 4.4
-            wave.repeatCount = .infinity
-            wave.animations = [expand, Self.fade(values: [0, 0.9, 0], times: [0, 0.3, 1])]
-            wave.animations?.forEach { $0.duration = wave.duration }
-            pulse.add(wave, forKey: "ripple")
         case .flow:
-            motion.frame = bounds
-            let cometLength = min(64, max(1, length - 18))
-            let cometWidth = SeamMetrics.cometWidth(width: style.width, hasDue: style.hasDue)
-            let dotWidth = SeamMetrics.dotWidth(width: style.width, hasDue: style.hasDue)
-            let position = vertical ? CGPoint(x: center.x, y: 9 + cometLength / 2)
-                : CGPoint(x: 9 + cometLength / 2, y: center.y)
-            let size = vertical ? CGSize(width: cometWidth, height: cometLength)
-                : CGSize(width: cometLength, height: cometWidth)
-            comet.frame = CGRect(x: position.x - size.width / 2, y: position.y - size.height / 2,
-                                 width: size.width, height: size.height)
-            let mask = CAShapeLayer()
-            mask.path = Self.taperedPath(size: size, edge: style.edge)
-            comet.mask = mask
-            dot.frame = CGRect(x: position.x - dotWidth / 2, y: position.y - dotWidth / 2,
-                               width: dotWidth, height: dotWidth)
-            dot.cornerRadius = dotWidth / 2
-            dot.backgroundColor = NSColor(red: 1, green: 0.96, blue: 0.92, alpha: 1).cgColor
-            dot.shadowColor = accent.cgColor
-            dot.shadowOpacity = 0.9
-            dot.shadowRadius = style.hasDue ? 7 : 4
-            let cycle = style.hasDue ? 2.8 : 5.2
+            let start = geometry.overflow
+            if vertical { radiance.layer.position.y = start } else { radiance.layer.position.x = start }
             let move = CABasicAnimation(keyPath: vertical ? "transform.translation.y" : "transform.translation.x")
             move.fromValue = 0
-            move.toValue = max(0, length - cometLength - 18)
+            move.toValue = length
             move.timingFunction = CAMediaTimingFunction(name: .linear)
-            let flow = CAAnimationGroup()
-            flow.duration = cycle
-            flow.repeatCount = .infinity
-            flow.animations = [move, Self.fade(values: [0, 1, 1, 0], times: [0, 0.16, 0.84, 1])]
-            flow.animations?.forEach { $0.duration = flow.duration }
-            motion.add(flow, forKey: "flow")
+            let visibility = Self.keyframes("opacity", values: [0, 1, 1, 0], times: [0, 0.14, 0.86, 1])
+            radiance.layer.add(Self.group([move, visibility], duration: style.cycle), forKey: "flow")
+        case .breathe:
+            let visibility = Self.keyframes("opacity", values: [0.1, 0.12, 0.9, 1, 0.6, 0.1],
+                                            times: [0, 0.12, 0.42, 0.52, 0.72, 1])
+            radiance.layer.add(Self.group([visibility], duration: style.cycle), forKey: "breathe")
+        case .ripple:
+            let spread = CABasicAnimation(keyPath: "transform.scale")
+            spread.fromValue = 0.08
+            spread.toValue = 1
+            spread.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            let visibility = Self.keyframes("opacity", values: [0, 0.9, 0.55, 0], times: [0, 0.16, 0.55, 1])
+            let wave = Self.group([spread, visibility], duration: style.cycle)
+            let now = CACurrentMediaTime()
+            wave.beginTime = now
+            radiance.layer.add(wave, forKey: "ripple")
+            wave.beginTime = now - style.cycle / 2
+            echo.layer.add(wave, forKey: "ripple")
         }
-        let countCycle: Double
-        switch style.animation {
-        case .flow: countCycle = style.hasDue ? 2.8 : 5.2
-        case .breathe: countCycle = style.hasDue ? 3.4 : 5.2
-        case .ripple: countCycle = style.hasDue ? 2.6 : 4.4
-        }
-        let cometLength = min(64, max(1, length - 18))
-        let position = style.animation == .flow
-            ? (vertical ? CGPoint(x: center.x, y: 9 + cometLength / 2)
-                        : CGPoint(x: 9 + cometLength / 2, y: center.y))
-            : center
-        if style.animation == .flow { motion.addSublayer(count) } else { layer?.addSublayer(count) }
-        let offset = SeamMetrics.countOffset(width: style.width)
-        var countPosition = position
+
+        if style.animation == .flow { radiance.layer.addSublayer(count) } else { layer?.addSublayer(count) }
+        let offset = SeamMetrics.countOffset(width: style.width) + style.width / 2
+        var countPosition = style.animation == .flow ? CGPoint.zero : horizon
         switch style.edge {
         case .left: countPosition.x += offset
         case .right: countPosition.x -= offset
@@ -183,17 +258,98 @@ final class SeamLightLayerView: NSView {
         count.foregroundColor = NSColor.white.cgColor
         count.contentsScale = window?.backingScaleFactor ?? 2
         count.isHidden = style.overdueCount == 0
-        let visibility = Self.fade(values: [0, 1, 1, 0, 0], times: [0, 0.04, 0.46, 0.5, 1])
-        visibility.duration = countCycle * 4
+        let visibility = Self.keyframes("opacity", values: [0, 1, 1, 0, 0], times: [0, 0.04, 0.46, 0.5, 1])
+        visibility.duration = style.cycle * 4
         visibility.repeatCount = .infinity
         count.add(visibility, forKey: "count")
     }
 
-    private static func fade(values: [Double], times: [NSNumber]) -> CAKeyframeAnimation {
-        let fade = CAKeyframeAnimation(keyPath: "opacity")
-        fade.values = values
-        fade.keyTimes = times
-        return fade
+    private func configureGlow(_ glow: SeamRadiance, style: SeamLightConfiguration,
+                               geometry: SeamGlowGeometry, length: CGFloat) {
+        let vertical = style.edge.isVertical
+        let strength: CGFloat = style.hasDue ? 1.15 : 1
+        for band in [glow.bloom, glow.core, glow.rim] { band.isHidden = style.animation == .ripple }
+        if style.animation == .ripple {
+            configureGradient(glow.atmosphere, edge: style.edge,
+                              along: length + geometry.haloLength * 0.4, cross: geometry.haloDepth,
+                              stops: [(.amber, 0), (.amber, 0), (.amber, 0.16),
+                                      (.gold, 0.65 * strength), (.amber, 0.18), (.amber, 0)])
+            glow.atmosphere.locations = [0, 0.6, 0.7, 0.78, 0.86, 1]
+            return
+        }
+        let breathing = style.animation == .breathe
+        let haloLength = breathing ? length + geometry.haloLength * 0.4 : geometry.haloLength
+        let bloomLength = breathing ? length * 0.85 : 102 * geometry.scale
+        let coreLength = breathing ? length * 0.7 : 42 * geometry.scale
+        let coreDepth = (3 + style.width * 0.9) * strength
+        let outward: CGFloat = style.edge == .left || style.edge == .top ? -1 : 1
+        let coreOffset = outward * coreDepth * 0.2
+        let position = vertical ? CGPoint(x: coreOffset, y: 0) : CGPoint(x: 0, y: coreOffset)
+        let haloStops: [(SunColor, CGFloat)] = breathing
+            ? [(.gold, 0.22 * strength), (.gold, 0.12), (.amber, 0.03), (.amber, 0)]
+            : [(.amber, 0.42 * strength), (.amber, 0.22), (.amber, 0.06), (.amber, 0)]
+        let bloomStops: [(SunColor, CGFloat)] = breathing
+            ? [(.white, 0.6), (.gold, 0.3), (.amber, 0.06), (.amber, 0)]
+            : [(.gold, 0.78), (.amber, 0.44), (.amber, 0.1), (.amber, 0)]
+        configureGradient(glow.atmosphere, edge: style.edge, along: haloLength, cross: geometry.haloDepth,
+                          stops: haloStops)
+        configureGradient(glow.bloom, edge: style.edge, along: bloomLength, cross: 30 * geometry.scale,
+                          stops: bloomStops)
+        configureGradient(glow.core, edge: style.edge, along: coreLength, cross: coreDepth, position: position,
+                          stops: [(.white, 1), (.gold, 0.9), (.amber, 0.35), (.amber, 0)])
+        let rimLength = breathing ? max(1, length - 18) : 112 * geometry.scale
+        configureGradient(glow.rim, edge: style.edge, along: rimLength, cross: 1.5,
+                          stops: [(.amber, 0), (.gold, 0.8), (.white, 0.95), (.gold, 0.8), (.amber, 0)], axial: true)
+    }
+
+    private func configureGradient(_ gradient: CAGradientLayer, edge: EdgeSide, along: CGFloat, cross: CGFloat,
+                                   position: CGPoint = .zero, stops: [(SunColor, CGFloat)], axial: Bool = false) {
+        let size = edge.isVertical ? CGSize(width: cross, height: along) : CGSize(width: along, height: cross)
+        gradient.frame = CGRect(x: position.x - size.width / 2, y: position.y - size.height / 2,
+                                width: size.width, height: size.height)
+        gradient.colors = Self.colors(stops)
+        gradient.locations = nil
+        gradient.type = axial ? .axial : .radial
+        if axial {
+            gradient.startPoint = edge.isVertical ? CGPoint(x: 0.5, y: 0) : CGPoint(x: 0, y: 0.5)
+            gradient.endPoint = edge.isVertical ? CGPoint(x: 0.5, y: 1) : CGPoint(x: 1, y: 0.5)
+        } else {
+            gradient.startPoint = CGPoint(x: 0.5, y: 0.5)
+            gradient.endPoint = CGPoint(x: 1, y: 1)
+        }
+    }
+
+    private enum SunColor {
+        case amber, gold, white
+        var color: NSColor {
+            switch self {
+            case .amber: return NSColor(srgbRed: 0.96, green: 0.43, blue: 0.16, alpha: 1)
+            case .gold: return NSColor(srgbRed: 1, green: 0.78, blue: 0.43, alpha: 1)
+            case .white: return NSColor(srgbRed: 1, green: 0.97, blue: 0.88, alpha: 1)
+            }
+        }
+    }
+
+    private static func colors(_ stops: [(SunColor, CGFloat)]) -> [CGColor] {
+        stops.map { $0.0.color.withAlphaComponent($0.1).cgColor }
+    }
+
+    private static func keyframes(_ key: String, values: [Double], times: [NSNumber]) -> CAKeyframeAnimation {
+        let animation = CAKeyframeAnimation(keyPath: key)
+        animation.values = values
+        animation.keyTimes = times
+        animation.calculationMode = .linear
+        animation.timingFunctions = Array(repeating: CAMediaTimingFunction(name: .easeInEaseOut), count: values.count - 1)
+        return animation
+    }
+
+    private static func group(_ animations: [CAAnimation], duration: CFTimeInterval) -> CAAnimationGroup {
+        animations.forEach { $0.duration = duration }
+        let group = CAAnimationGroup()
+        group.duration = duration
+        group.repeatCount = .infinity
+        group.animations = animations
+        return group
     }
 
     static func taperedPath(size: CGSize, edge: EdgeSide) -> CGPath {
