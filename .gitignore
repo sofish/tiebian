@@ -1,0 +1,5 @@
+.build/
+dist/
+.DS_Store
+*.xcuserstate
+Resources/icon-1024.png
