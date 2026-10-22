@@ -41,7 +41,7 @@ GitHub 仓库已于 2026-10-20 按用户要求设为 public，源码历史和 Re
 ```bash
 python3 scripts/package_release.py \
   --identity 'Developer ID Application: Your Name (TEAMID)' \
-  --output dist/releases/1.3.0
+  --output dist/releases/1.3.1
 ```
 
 脚本先构建和签名 Universal App，公证并 staple App，再生成 ZIP 和 DMG，签名、公证并 staple DMG。每次公证必须读到 `Accepted`，随后执行 stapler 和 Gatekeeper 检查；相同目录已有发布文件时停止，避免覆盖已有版本。输出 `release-proof.json` 和 `SHA256SUMS.txt`，记录源码 SHA、架构、公证提交 ID 和文件哈希。
