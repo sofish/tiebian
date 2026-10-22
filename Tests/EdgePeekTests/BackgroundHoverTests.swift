@@ -71,14 +71,26 @@ final class BackgroundHoverTests: XCTestCase {
     func testHorizonAndCountHaveRoomAtEveryWidthAndEdge() {
         for edge in EdgeSide.allCases {
             for width in [SeamSizing.minimumWidth, SeamSizing.defaultWidth, SeamSizing.widthRange.upperBound] {
-                let size = SeamMetrics.panelSize(edge: edge, length: 440, width: width)
-                let center = SeamMetrics.lineCenter(edge: edge, size: size, width: width)
-                let inset = edge.isVertical ? center.x : center.y
-                let depth = edge.isVertical ? size.width : size.height
-                let outward = edge == .left || edge == .top ? inset : depth - inset
-                XCTAssertEqual(outward - width / 2, 0, accuracy: 0.001)
-                XCTAssertGreaterThanOrEqual(depth, 24)
-                XCTAssertLessThanOrEqual(outward + SeamMetrics.countOffset(width: width) + 10, depth + 0.001)
+                for countSize in [SeamSizing.defaultCountSize, SeamSizing.countSizeRange.upperBound] {
+                    let size = SeamMetrics.panelSize(
+                        edge: edge,
+                        length: 440,
+                        width: width,
+                        countSize: countSize
+                    )
+                    let center = SeamMetrics.lineCenter(edge: edge, size: size, width: width)
+                    let inset = edge.isVertical ? center.x : center.y
+                    let depth = edge.isVertical ? size.width : size.height
+                    let outward = edge == .left || edge == .top ? inset : depth - inset
+                    XCTAssertEqual(outward - width / 2, 0, accuracy: 0.001)
+                    XCTAssertGreaterThanOrEqual(depth, 24)
+                    // The whole count label must fit between the line and the inner edge.
+                    XCTAssertLessThanOrEqual(
+                        outward + SeamMetrics.countOffset(width: width)
+                            + SeamMetrics.countHalfExtent(countSize: countSize),
+                        depth + 0.001
+                    )
+                }
             }
         }
     }

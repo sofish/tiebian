@@ -9,13 +9,16 @@ final class StatusMenuTests: XCTestCase {
         _ = NSApplication.shared
         let delegate = AppDelegate()
         let menu = delegate.buildStatusMenu()
-        XCTAssertEqual(menu.items.filter { !$0.isSeparatorItem }.prefix(7).map(\.title),
-                       ["新建便签", "显示 / 收起全部便签", "配置", "光条大小", "光条动画", "安装 Skill…", "便签存放位置"])
+        XCTAssertEqual(menu.items.filter { !$0.isSeparatorItem }.prefix(8).map(\.title),
+                       ["新建便签", "显示 / 收起全部便签", "配置", "光条大小", "便签字号", "光条动画", "安装 Skill…", "便签存放位置"])
         let animations = try XCTUnwrap(menu.item(withTitle: "光条动画")?.submenu)
         XCTAssertEqual(animations.items.map(\.title), ["流光", "呼吸", "涟漪"])
         XCTAssertEqual(animations.items.map(\.state), [.on, .off, .off])
+        let fonts = try XCTUnwrap(menu.item(withTitle: "便签字号")?.submenu)
+        XCTAssertEqual(fonts.items.map(\.title), ["小字", "标准", "大字"])
+        XCTAssertEqual(fonts.items.map(\.state), [.off, .on, .off])
         let size = try XCTUnwrap(menu.item(withTitle: "光条大小")?.submenu)
-        XCTAssertEqual(size.items.compactMap(\.view).count, 2)
+        XCTAssertEqual(size.items.compactMap(\.view).count, 3)
         let shortcut = try XCTUnwrap(menu.item(withTitle: "显示 / 收起全部便签"))
         XCTAssertEqual(shortcut.keyEquivalent, " ")
         XCTAssertEqual(shortcut.keyEquivalentModifierMask, [.control, .option])
@@ -48,12 +51,18 @@ final class StatusMenuTests: XCTestCase {
         XCTAssertTrue(slider.sendAction(slider.action, to: slider.target))
         XCTAssertEqual(requested, 440)
         XCTAssertEqual(slider.accessibilityLabel(), "光条长度")
-        let widthView = SeamSizeMenuView(dimension: .width)
-        widthView.update(value: 5.4, range: 2.7...16.2)
-        let widthSlider = try XCTUnwrap(widthView.subviews.compactMap { $0 as? NSSlider }.first)
-        XCTAssertEqual(widthSlider.doubleValue, 5.4)
-        XCTAssertEqual(widthSlider.accessibilityLabel(), "光条宽度")
-        XCTAssertEqual(widthSlider.accessibilityValueDescription(), "5.4 pt")
+        let dimensionChecks: [(SeamSizeMenuView.Dimension, Double, ClosedRange<Double>, String)] = [
+            (.width, 5.4, 2.7...16.2, "光条宽度"),
+            (.count, 8.4, 6...18, "光条数字"),
+        ]
+        for (dimension, value, range, label) in dimensionChecks {
+            let view = SeamSizeMenuView(dimension: dimension)
+            view.update(value: value, range: range)
+            let slider = try XCTUnwrap(view.subviews.compactMap { $0 as? NSSlider }.first)
+            XCTAssertEqual(slider.doubleValue, value)
+            XCTAssertEqual(slider.accessibilityLabel(), label)
+            XCTAssertEqual(slider.accessibilityValueDescription(), "\(value) pt")
+        }
     }
 
     func testSkillDialogOnlyOffersCopyPromptAndCloseWithCurrentLocation() {

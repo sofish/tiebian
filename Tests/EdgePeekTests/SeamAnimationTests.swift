@@ -119,6 +119,25 @@ final class SeamAnimationTests: XCTestCase {
         XCTAssertFalse(try child("count", of: breathe.layer).isHidden)
     }
 
+    func testCountSizeIsAdjustableWithoutRebuildingTheGlow() throws {
+        let view = makeLight()
+        let glow = try child("radiance", of: view.layer)
+        let keep = CABasicAnimation(keyPath: "opacity")
+        keep.duration = 60
+        glow.add(keep, forKey: "keep")
+        let small = try XCTUnwrap(child("count", of: glow) as? CATextLayer)
+        let smallFrame = small.frame
+
+        view.configure(.init(edge: .left, width: 5.4, hasDue: false, noteCount: 6,
+                             animation: .flow, countSize: 15), hovered: false)
+
+        let large = try XCTUnwrap(child("count", of: glow) as? CATextLayer)
+        XCTAssertEqual(large.fontSize, 15)
+        XCTAssertGreaterThan(large.frame.width, smallFrame.width)
+        XCTAssertGreaterThan(large.frame.height, smallFrame.height)
+        XCTAssertNotNil(glow.animation(forKey: "keep"))
+    }
+
     func testLightCountShowsEveryNoteAndTurnsRedOnlyWhenOverdue() throws {
         let normal = makeLight(due: false)
         let normalCount = try XCTUnwrap(child("count", of: try child("radiance", of: normal.layer)) as? CATextLayer)

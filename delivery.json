@@ -9,7 +9,7 @@
         "scripts/verify_github_release.py",
         "{commit}"
       ],
-      "artifactId": "sofish/tiebian@v1.3.1",
+      "artifactId": "sofish/tiebian@v1.3.2",
       "state": "VALID"
     }
   ]

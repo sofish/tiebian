@@ -37,13 +37,15 @@ enum AppFonts {
 
     /// Resolve the font name after registration. If the bundled font cannot be
     /// found (for example while running a loose debug binary), Songti SC keeps
-    /// the interface readable.
-    static var chineseName: String {
+    /// the interface readable. Registration is requested here so layout
+    /// metrics resolved before launch cannot silently use the fallback face.
+    static let chineseName: String = {
+        register()
         if NSFont(name: bundledChineseName, size: 12) != nil {
             return bundledChineseName
         }
         return fallbackChineseName
-    }
+    }()
 
     private static func candidateURLs() -> [URL] {
         var urls: [URL] = []

@@ -24,7 +24,6 @@ final class EdgeController: NSObject {
     private let cardUndoToast = UndoToastController()
     private(set) var boardLayout: GroupBoardLayout?
     let boardPageState = BoardPageState()
-    let boardDragState = BoardDragState()
 
     private var previewPanel: NSPanel?
     private var previewHost: NSHostingView<AnyView>?
@@ -103,6 +102,7 @@ final class EdgeController: NSObject {
         lastOverdueIDs = Set(store.overdueNotes.map(\.id))
         seamState.edge = anchor.edge
         seamState.width = sizePreference.width
+        seamState.countSize = sizePreference.countSize
         seamState.animation = sizePreference.animation
         applyNoteSummary(hasDue: !lastOverdueIDs.isEmpty, count: store.notes.count)
 
@@ -162,6 +162,26 @@ final class EdgeController: NSObject {
         closeBoard(animated: false)
         hidePreview(immediately: true)
         refreshSeam(reposition: true, animated: false)
+    }
+
+    var seamCountSize: Double { sizePreference.countSize }
+
+    func setSeamCountSize(_ size: Double) {
+        let requested = SeamSizing.countSize(size)
+        guard requested != seamCountSize else { return }
+        sizePreference.countSize = requested
+        seamState.countSize = requested
+        refreshSeam(reposition: true, animated: false)
+    }
+
+    var noteFontSize: NoteFontSize { NoteFontPreferences().size }
+
+    func setNoteFontSize(_ size: NoteFontSize) {
+        let preferences = NoteFontPreferences()
+        guard size != preferences.size else { return }
+        preferences.size = size
+        hidePreview(immediately: true)
+        if boardVisible { refreshBoard(animated: false) }
     }
 
     func toggleAllNotes() {
@@ -249,7 +269,8 @@ final class EdgeController: NSObject {
     // MARK: - Setup
 
     private func buildSeam() {
-        let size = SeamMetrics.panelSize(edge: anchor.edge, length: seamLength, width: seamWidth)
+        let size = SeamMetrics.panelSize(edge: anchor.edge, length: seamLength,
+                                         width: seamWidth, countSize: seamCountSize)
         let frame = seamFrame(for: anchor, screen: currentScreen)
         let panel = PanelFactory.make(frame: frame, keyable: false)
         panel.hasShadow = false
@@ -424,7 +445,8 @@ final class EdgeController: NSObject {
             }
         }
 
-        let size = SeamMetrics.panelSize(edge: newAnchor.edge, length: seamLength, width: seamWidth)
+        let size = SeamMetrics.panelSize(edge: newAnchor.edge, length: seamLength,
+                                         width: seamWidth, countSize: seamCountSize)
         let target = EdgeGeometry.frame(
             for: newAnchor,
             size: size,
@@ -608,8 +630,7 @@ final class EdgeController: NSObject {
                 layout: layout,
                 edge: anchor.edge,
                 actions: boardActions(),
-                pageState: boardPageState,
-                dragState: boardDragState
+                pageState: boardPageState
             )
         )
         let host = FirstMouseHostingView(rootView: root)
@@ -639,7 +660,6 @@ final class EdgeController: NSObject {
     private func closeBoard(animated: Bool) {
         boardHeldOpen = false
         draggedCardID = nil
-        boardDragState.reset()
         cancelOpen()
         cancelClose()
         hidePreview(immediately: true)
@@ -696,8 +716,7 @@ final class EdgeController: NSObject {
                 layout: layout,
                 edge: anchor.edge,
                 actions: boardActions(),
-                pageState: boardPageState,
-                dragState: boardDragState
+                pageState: boardPageState
             )
         )
 
@@ -727,7 +746,7 @@ final class EdgeController: NSObject {
             },
             newNote: { [weak self] in self?.createNote() },
             cardDragBegan: { [weak self] in self?.cardDragBegan(noteID: $0) },
-            cardDragMoved: { [weak self] in self?.cardDragMoved(noteID: $0, at: $1) },
+            cardDragMoved: { [weak self] in self?.cardDragMoved(noteID: $0, at: $1) ?? .none },
             cardDragEnded: { [weak self] in self?.cardDragEnded(noteID: $0, at: $1, cancelled: $2) }
         )
     }
@@ -735,14 +754,33 @@ final class EdgeController: NSObject {
     func cardDragBegan(noteID: UUID) {
         guard boardVisible, store.note(with: noteID) != nil else { return }
         draggedCardID = noteID
-        boardDragState.reset()
         cancelClose()
         hidePreview(immediately: true)
     }
 
-    func cardDragMoved(noteID: UUID, at point: CGPoint) {
-        guard draggedCardID == noteID, let outside = deletionDistance(at: point) else { return }
-        boardDragState.setDeleteArmed(outside)
+    /// What releasing the card here would do. Returning the target rather than
+    /// a Bool lets the drag surface name the destination it would merge into.
+    func cardDragMoved(noteID: UUID, at point: CGPoint) -> CardDropTarget {
+        guard draggedCardID == noteID else { return .none }
+        return dropTarget(noteID: noteID, at: point)
+    }
+
+    /// One rule set for both the hint and the release, so the promise on
+    /// screen is exactly what `cardDragEnded` carries out.
+    private func dropTarget(noteID: UUID, at point: CGPoint) -> CardDropTarget {
+        guard let outside = deletionDistance(at: point) else { return .none }
+        if outside { return .delete }
+        guard let target = groupPlacement(at: point),
+              let note = store.note(with: noteID),
+              NoteText.primaryTag(in: note.content) != target.entity.tag
+        else { return .none }
+        return .group(target.entity.tag)
+    }
+
+    private func groupPlacement(at point: CGPoint) -> BoardGroupPlacement? {
+        guard let frame = boardPanel?.frame, let layout = boardLayout else { return nil }
+        let local = CGPoint(x: point.x - frame.minX, y: frame.maxY - point.y)
+        return layout.group(at: local, page: boardPageState.page)
     }
 
     /// `nil` when the board is not visible, so a drop cannot be mistaken for
@@ -755,26 +793,19 @@ final class EdgeController: NSObject {
     func cardDragEnded(noteID: UUID, at point: CGPoint, cancelled: Bool) {
         guard draggedCardID == noteID else { return }
         draggedCardID = nil
-        boardDragState.reset()
-        if !cancelled, let outside = deletionDistance(at: point) {
-            if outside {
+        if !cancelled {
+            switch dropTarget(noteID: noteID, at: point) {
+            case .delete:
                 if let note = store.note(with: noteID) {
                     cardUndoToast.delete(note, from: store, on: currentScreen)
                 }
-            } else {
-                retagNote(noteID: noteID, atScreenPoint: point)
+            case .group(let tag):
+                store.setPrimaryTag(id: noteID, tag: tag)
+            case .none:
+                break
             }
         }
         if !isMouseInsideBoard(), !isMouseInsideSeam() { scheduleClose(after: 0.3) }
-    }
-
-    /// Dropping a card on another group rewrites its primary hashtag. Empty
-    /// board space or its own group leaves the note where it was.
-    private func retagNote(noteID: UUID, atScreenPoint point: CGPoint) {
-        guard let frame = boardPanel?.frame, let layout = boardLayout else { return }
-        let local = CGPoint(x: point.x - frame.minX, y: frame.maxY - point.y)
-        guard let target = layout.group(at: local, page: boardPageState.page) else { return }
-        store.setPrimaryTag(id: noteID, tag: target.entity.tag)
     }
 
     private func boardFrame(size: CGSize, screen: NSScreen) -> CGRect {
@@ -1049,7 +1080,8 @@ final class EdgeController: NSObject {
                 edge: anchor.edge,
                 length: SeamSizing.length(sizePreference.length, edge: anchor.edge,
                                           availableSize: edgeBounds(for: screen).size),
-                width: seamWidth
+                width: seamWidth,
+                countSize: seamCountSize
             ),
             in: edgeBounds(for: screen),
             inset: 0

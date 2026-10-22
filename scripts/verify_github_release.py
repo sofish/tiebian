@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 
 REPO = "sofish/tiebian"
-VERSION = "1.3.1"
+VERSION = "1.3.2"
 TAG = f"v{VERSION}"
 ASSETS = {
     f"EdgePeek-{VERSION}-macOS-universal.dmg",

@@ -7,24 +7,8 @@ struct BoardActions {
     var setNoteDueDate: (UUID, Date?) -> Void = { _, _ in }
     var newNote: () -> Void = {}
     var cardDragBegan: (UUID) -> Void = { _ in }
-    var cardDragMoved: (UUID, CGPoint) -> Void = { _, _ in }
+    var cardDragMoved: (UUID, CGPoint) -> CardDropTarget = { _, _ in .none }
     var cardDragEnded: (UUID, CGPoint, Bool) -> Void = { _, _, _ in }
-}
-
-/// Drag feedback lives outside the SwiftUI view so the native dragging
-/// session can arm the delete target without rebuilding the board.
-@MainActor
-final class BoardDragState: ObservableObject {
-    @Published private(set) var isDeleteArmed = false
-
-    func setDeleteArmed(_ armed: Bool) {
-        guard armed != isDeleteArmed else { return }
-        isDeleteArmed = armed
-    }
-
-    func reset() {
-        setDeleteArmed(false)
-    }
 }
 
 /// Board pages live outside the SwiftUI view so a note move can rebuild the
@@ -54,7 +38,9 @@ struct GroupBoardView: View {
     let edge: EdgeSide
     let actions: BoardActions
     @ObservedObject var pageState: BoardPageState
-    let dragState: BoardDragState
+    /// Resolved once per board build so each card body does not read
+    /// UserDefaults again.
+    let cardMetrics: NoteCardMetrics = .current
 
     @State private var appeared = false
     @State private var hoveredNoteID: UUID?
@@ -95,9 +81,6 @@ struct GroupBoardView: View {
             }
         }
         .frame(width: layout.pageSize.width, height: layout.pageSize.height)
-        .overlay {
-            BoardDeleteHint(dragState: dragState)
-        }
         .onAppear {
             withAnimation(Theme.spring) {
                 appeared = true
@@ -121,7 +104,7 @@ struct GroupBoardView: View {
                         .fill(group.entity.color.dot.opacity(0.5))
                         .frame(width: 9, height: 1.5)
                     MixedText(
-                        "散页",
+                        group.entity.displayName,
                         size: 8.2,
                         color: Theme.inkFaint
                     )
@@ -176,6 +159,7 @@ struct GroupBoardView: View {
         return NoteCardView(
             note: card.note,
             paperColor: group.entity.color,
+            metrics: cardMetrics,
             isHovered: hovered,
             angle: card.rotation,
             onHover: { hovering in
@@ -295,38 +279,5 @@ struct GroupBoardView: View {
             x: layout.pageSize.width / 2,
             y: contentHeight / 2
         )
-    }
-}
-
-/// Observes the drag state by itself so arming the delete target repaints the
-/// hint only, instead of rebuilding every card on the board.
-private struct BoardDeleteHint: View {
-    @ObservedObject var dragState: BoardDragState
-
-    var body: some View {
-        Group {
-            if dragState.isDeleteArmed {
-                HStack(spacing: 7) {
-                    Image(systemName: "trash")
-                        .font(.system(size: 11, weight: .semibold))
-                    MixedText("松手删除", size: 12.5, weight: .medium, color: Theme.accentDeep)
-                }
-                .padding(.horizontal, 15)
-                .padding(.vertical, 9)
-                .background(
-                    Capsule()
-                        .fill(Theme.paper.opacity(0.97))
-                        .shadow(color: Theme.shadow.opacity(0.22), radius: 10, y: 4)
-                )
-                .overlay(
-                    Capsule()
-                        .strokeBorder(Theme.accentDeep.opacity(0.55), lineWidth: 1)
-                )
-                .accessibilityLabel("松手删除便签")
-                .transition(.scale(scale: 0.92).combined(with: .opacity))
-            }
-        }
-        .animation(Theme.quickSpring, value: dragState.isDeleteArmed)
-        .allowsHitTesting(false)
     }
 }

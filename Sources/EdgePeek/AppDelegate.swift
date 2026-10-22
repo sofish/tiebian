@@ -12,7 +12,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var launchAtLoginItem: NSMenuItem?
     private var seamSizeView: SeamSizeMenuView?
     private var seamWidthView: SeamSizeMenuView?
+    private var seamCountView: SeamSizeMenuView?
     private var animationMenu: NSMenu?
+    private var noteFontMenu: NSMenu?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppFonts.register()
@@ -85,18 +87,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let sizeItem = NSMenuItem(title: "光条大小", action: nil, keyEquivalent: "")
         let sizeMenu = NSMenu(title: "光条大小")
         sizeMenu.delegate = self
-        let sliderItem = NSMenuItem()
-        let sizeView = SeamSizeMenuView()
-        sizeView.onChange = { [weak self] length in self?.controller?.setSeamLength(length) }
-        seamSizeView = sizeView
-        sliderItem.view = sizeView
-        sizeMenu.addItem(sliderItem)
-        let widthItem = NSMenuItem()
-        let widthView = SeamSizeMenuView(dimension: .width)
-        widthView.onChange = { [weak self] width in self?.controller?.setSeamWidth(width) }
-        seamWidthView = widthView
-        widthItem.view = widthView
-        sizeMenu.addItem(widthItem)
+        seamSizeView = addSizeSlider(to: sizeMenu, dimension: .length) { [weak self] length in
+            self?.controller?.setSeamLength(length)
+        }
+        seamWidthView = addSizeSlider(to: sizeMenu, dimension: .width) { [weak self] width in
+            self?.controller?.setSeamWidth(width)
+        }
+        seamCountView = addSizeSlider(to: sizeMenu, dimension: .count) { [weak self] size in
+            self?.controller?.setSeamCountSize(size)
+        }
         let resetSize = NSMenuItem(title: "恢复默认尺寸（2 倍）",
                                   action: #selector(resetSeamSize), keyEquivalent: "")
         resetSize.target = self
@@ -104,15 +103,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sizeItem.submenu = sizeMenu
         menu.addItem(sizeItem)
 
+        let fontItem = NSMenuItem(title: "便签字号", action: nil, keyEquivalent: "")
+        let fontMenu = makeChoiceMenu(
+            title: "便签字号",
+            choices: NoteFontSize.allCases.map { (title: $0.title, rawValue: $0.rawValue) },
+            action: #selector(selectNoteFontSize(_:))
+        )
+        noteFontMenu = fontMenu
+        fontItem.submenu = fontMenu
+        menu.addItem(fontItem)
+
         let animationItem = NSMenuItem(title: "光条动画", action: nil, keyEquivalent: "")
-        let animationMenu = NSMenu(title: "光条动画")
-        animationMenu.delegate = self
-        for animation in SeamAnimation.allCases {
-            let item = NSMenuItem(title: animation.title, action: #selector(selectSeamAnimation(_:)), keyEquivalent: "")
-            item.representedObject = animation.rawValue
-            item.target = self
-            animationMenu.addItem(item)
-        }
+        let animationMenu = makeChoiceMenu(
+            title: "光条动画",
+            choices: SeamAnimation.allCases.map { (title: $0.title, rawValue: $0.rawValue) },
+            action: #selector(selectSeamAnimation(_:))
+        )
         self.animationMenu = animationMenu
         animationItem.submenu = animationMenu
         menu.addItem(animationItem)
@@ -175,11 +181,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let controller {
             seamSizeView?.update(value: controller.seamLength, range: controller.seamLengthRange)
             seamWidthView?.update(value: controller.seamWidth, range: SeamSizing.widthRange)
+            seamCountView?.update(value: controller.seamCountSize, range: SeamSizing.countSizeRange)
         }
         updateStartupMenu(status: LaunchAtLogin.status)
-        let selected = controller?.seamState.animation ?? .flow
-        for item in animationMenu?.items ?? [] {
-            item.state = item.representedObject as? String == selected.rawValue ? .on : .off
+        syncChoiceMenu(
+            animationMenu,
+            selected: (controller?.seamState.animation ?? .flow).rawValue
+        )
+        syncChoiceMenu(
+            noteFontMenu,
+            selected: (controller?.noteFontSize ?? .standard).rawValue
+        )
+    }
+
+    private func addSizeSlider(
+        to menu: NSMenu,
+        dimension: SeamSizeMenuView.Dimension,
+        onChange: @escaping (Double) -> Void
+    ) -> SeamSizeMenuView {
+        let item = NSMenuItem()
+        let view = SeamSizeMenuView(dimension: dimension)
+        view.onChange = onChange
+        item.view = view
+        menu.addItem(item)
+        return view
+    }
+
+    private func makeChoiceMenu(
+        title: String,
+        choices: [(title: String, rawValue: String)],
+        action: Selector
+    ) -> NSMenu {
+        let menu = NSMenu(title: title)
+        menu.delegate = self
+        for choice in choices {
+            let item = NSMenuItem(title: choice.title, action: action, keyEquivalent: "")
+            item.representedObject = choice.rawValue
+            item.target = self
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    private func syncChoiceMenu(_ menu: NSMenu?, selected: String) {
+        for item in menu?.items ?? [] {
+            item.state = item.representedObject as? String == selected ? .on : .off
         }
     }
 
@@ -268,6 +314,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let raw = sender.representedObject as? String,
               let animation = SeamAnimation(rawValue: raw) else { return }
         controller?.setSeamAnimation(animation)
+    }
+
+    @objc private func selectNoteFontSize(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let size = NoteFontSize(rawValue: raw) else { return }
+        controller?.setNoteFontSize(size)
     }
 
     func makeSkillAlert(configuration: SkillConfiguration = .bundled) -> NSAlert {

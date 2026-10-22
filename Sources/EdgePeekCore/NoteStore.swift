@@ -340,7 +340,7 @@ public final class NoteStore: ObservableObject {
                 updatedAt: now.addingTimeInterval(-60)
             ),
             StickyNote(
-                content: "随时记一笔\n按 ⌘ ⇧ Space 新建便签。\n按 ⌃ ⌥ Space 显示或收起全部便签。\n第一行会变成卡片上的标题。\n#快捷键",
+                content: "随时记一笔\n按 ⌘ ⇧ Space 新建便签。\n按 ⌃ ⌥ Space 显示或收起全部便签。\n整段内容用同一种字号显示。\n#快捷键",
                 color: .sky,
                 createdAt: now.addingTimeInterval(-120),
                 updatedAt: now.addingTimeInterval(-120)

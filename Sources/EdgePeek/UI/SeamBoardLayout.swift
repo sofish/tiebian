@@ -13,6 +13,10 @@ struct GroupEntity: Identifiable {
     var id: String { key }
     var count: Int { notes.count }
     var displayTag: String { tag ?? "" }
+    /// The label the board and the merge hint both show for an untagged group.
+    static let untaggedName = "散页"
+    /// The label the board and the merge hint both show for this group.
+    var displayName: String { tag ?? Self.untaggedName }
 
     /// A group reads from the oldest note to the newest. Pinned notes stay
     /// first, where they can be seen without unfolding the stack.
@@ -71,9 +75,15 @@ enum AngleHash {
 }
 
 enum SeamMetrics {
-    static func panelSize(edge: EdgeSide, length: CGFloat, width: CGFloat) -> CGSize {
+    static func panelSize(
+        edge: EdgeSide,
+        length: CGFloat,
+        width: CGFloat,
+        countSize: CGFloat = SeamSizing.defaultCountSize
+    ) -> CGSize {
         // Leave room inward for the overdue count; the outward glow meets the screen edge.
-        let depth = max(24, inset(width: width) + countOffset(width: width) + 10)
+        let depth = max(24, inset(width: width) + countOffset(width: width)
+            + countHalfExtent(countSize: countSize) + 2)
         return edge.isVertical
             ? CGSize(width: depth, height: length)
             : CGSize(width: length, height: depth)
@@ -85,6 +95,17 @@ enum SeamMetrics {
 
     static func countOffset(width: CGFloat) -> CGFloat {
         max(9, width + 6)
+    }
+
+    /// Half the width of the count label; the seam panel must reserve this much
+    /// room beyond the label's centre so larger digits never meet the edge.
+    static func countHalfExtent(countSize: CGFloat) -> CGFloat {
+        max(10, countSize * 1.2)
+    }
+
+    /// Label height for the count, matching the monospaced digits' line box.
+    static func countHeight(countSize: CGFloat) -> CGFloat {
+        max(14, countSize * 1.7)
     }
 
     static func lineCenter(edge: EdgeSide, size: CGSize, width: CGFloat) -> CGPoint {

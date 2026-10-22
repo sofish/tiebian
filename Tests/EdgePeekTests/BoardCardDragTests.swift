@@ -31,19 +31,15 @@ final class BoardCardDragTests: XCTestCase {
         let inside = CGPoint(x: board.frame.midX, y: board.frame.midY)
         let outside = CGPoint(x: board.frame.maxX + 200, y: board.frame.maxY + 200)
         controller.cardDragBegan(noteID: note.id)
-        controller.cardDragMoved(noteID: note.id, at: inside)
-        XCTAssertFalse(controller.boardDragState.isDeleteArmed)
-        controller.cardDragMoved(noteID: note.id, at: outside)
-        XCTAssertTrue(controller.boardDragState.isDeleteArmed)
-        controller.cardDragMoved(noteID: note.id, at: inside)
-        XCTAssertFalse(controller.boardDragState.isDeleteArmed)
+        XCTAssertEqual(controller.cardDragMoved(noteID: note.id, at: inside), .none)
+        XCTAssertEqual(controller.cardDragMoved(noteID: note.id, at: outside), .delete)
+        XCTAssertEqual(controller.cardDragMoved(noteID: note.id, at: inside), .none)
         pointer = outside
-        controller.cardDragMoved(noteID: note.id, at: outside)
-        XCTAssertTrue(controller.boardDragState.isDeleteArmed)
+        XCTAssertEqual(controller.cardDragMoved(noteID: note.id, at: outside), .delete)
         try await Task.sleep(for: .milliseconds(650))
         XCTAssertTrue(controller.seamState.isBoardOpen)
         controller.cardDragEnded(noteID: note.id, at: outside, cancelled: true)
-        XCTAssertFalse(controller.boardDragState.isDeleteArmed)
+        XCTAssertEqual(controller.cardDragMoved(noteID: note.id, at: outside), .none)
         XCTAssertEqual(store.note(with: note.id), snapshot)
 
         controller.cardDragBegan(noteID: note.id)
@@ -91,13 +87,49 @@ final class BoardCardDragTests: XCTestCase {
         let drop = CGPoint(x: board.frame.minX + local.x, y: board.frame.maxY - local.y)
 
         controller.cardDragBegan(noteID: note.id)
+        XCTAssertEqual(controller.cardDragMoved(noteID: note.id, at: drop), .group("#灵感"))
         controller.cardDragEnded(noteID: note.id, at: drop, cancelled: false)
+
+        XCTAssertEqual(controller.cardDragMoved(noteID: note.id, at: drop), .none)
 
         let moved = try XCTUnwrap(store.note(with: note.id))
         XCTAssertEqual(NoteText.primaryTag(in: moved.content), "#灵感")
         XCTAssertEqual(moved.content, "移动我\n#灵感")
         XCTAssertEqual(moved.color, .sky)
         XCTAssertEqual(store.note(with: target.id)?.content, "目标\n#灵感")
+    }
+
+    func testUntaggedGroupPromisesAndPerformsTheSameDrop() async throws {
+        _ = NSApplication.shared
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EdgePeekCardUntaggedTests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = NoteStore(fileURL: directory.appendingPathComponent("notes.json"), seedIfMissing: false)
+        _ = store.addNote(content: "散页一张", color: .cream)
+        let note = store.addNote(content: "移动我\n#工作", color: .rose)
+        var pointer = CGPoint(x: 100_000, y: 100_000)
+        let controller = EdgeController(store: store, mouseLocation: { pointer })
+        defer { controller.shutdown() }
+        let seam = try XCTUnwrap(NSApp.windows.first {
+            ($0.contentView as? NSHostingView<SeamView>)?.rootView.state === controller.seamState
+        })
+        pointer = CGPoint(x: seam.frame.midX, y: seam.frame.midY)
+        try await Task.sleep(for: .milliseconds(400))
+        let board = try XCTUnwrap(NSApp.windows.first {
+            $0.isVisible && $0.contentView is FirstMouseHostingView<AnyView>
+        })
+        let layout = try XCTUnwrap(controller.boardLayout)
+        let untagged = try XCTUnwrap(layout.groups.first { $0.entity.isUntagged })
+        let local = CGPoint(x: untagged.labelFrame.midX, y: untagged.labelFrame.midY)
+        let drop = CGPoint(x: board.frame.minX + local.x, y: board.frame.maxY - local.y)
+
+        controller.cardDragBegan(noteID: note.id)
+        XCTAssertEqual(controller.cardDragMoved(noteID: note.id, at: drop), .group(nil))
+        controller.cardDragEnded(noteID: note.id, at: drop, cancelled: false)
+
+        let moved = try XCTUnwrap(store.note(with: note.id))
+        XCTAssertNil(NoteText.primaryTag(in: moved.content))
+        XCTAssertEqual(moved.content, "移动我")
     }
 
     func testNativeCardClickOpensOnlyAfterInsideMouseRelease() throws {

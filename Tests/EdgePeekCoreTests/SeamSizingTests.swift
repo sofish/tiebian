@@ -25,6 +25,24 @@ final class SeamSizingTests: XCTestCase {
         XCTAssertEqual(SeamSizing.width(.nan), 5.4)
     }
 
+    func testCountSizeDefaultsAndClampsIndependently() throws {
+        let name = "EdgePeekCountTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+
+        let preference = SeamPreferences(defaults: defaults)
+        XCTAssertEqual(preference.countSize, 8.4)
+        preference.countSize = 12
+        XCTAssertEqual(SeamPreferences(defaults: defaults).countSize, 12)
+        preference.countSize = 1
+        XCTAssertEqual(preference.countSize, SeamSizing.countSizeRange.lowerBound)
+        preference.countSize = 99
+        XCTAssertEqual(preference.countSize, SeamSizing.countSizeRange.upperBound)
+        preference.countSize = .nan
+        XCTAssertEqual(preference.countSize, SeamSizing.countSizeRange.upperBound)
+        XCTAssertEqual(SeamSizing.countSize(.nan), 8.4)
+    }
+
     func testMinimumDefaultAndMaximumOnAllEdges() {
         let size = CGSize(width: 1440, height: 900)
         for edge in EdgeSide.allCases {
