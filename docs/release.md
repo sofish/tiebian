@@ -41,12 +41,14 @@ GitHub 仓库已于 2026-10-20 按用户要求设为 public，源码历史和 Re
 ```bash
 python3 scripts/package_release.py \
   --identity 'Developer ID Application: Your Name (TEAMID)' \
-  --output dist/releases/1.2.0
+  --output dist/releases/1.3.0
 ```
 
 脚本先构建和签名 Universal App，公证并 staple App，再生成 ZIP 和 DMG，签名、公证并 staple DMG。每次公证必须读到 `Accepted`，随后执行 stapler 和 Gatekeeper 检查；相同目录已有发布文件时停止，避免覆盖已有版本。输出 `release-proof.json` 和 `SHA256SUMS.txt`，记录源码 SHA、架构、公证提交 ID 和文件哈希。
 
 打包不自动创建 GitHub Release。得到用户发布授权后，先确认目标仓库可见性符合当前授权（目前为 public），再用实际源码 SHA 创建 tag / Release，上传 DMG、ZIP、proof 和校验文件。发布后重新下载资产，比较 SHA-256，挂载 DMG 核对 App 签名、架构、源码 SHA、Applications 快捷方式及安装说明，最后卸载映像；公开发布还应验证仓库与 Release 可匿名访问。
+
+根目录 `delivery.json` 声明 GitHub Release 交付探针。`/deploy` 从已推送的主分支提交读取它，运行 `scripts/verify_github_release.py <commit>`：确认 Release tag 指向该提交、状态不是 draft/prerelease，并重新下载 ZIP/DMG，与 `release-proof.json` 内的 SHA-256 逐项比对。升版本时同步更新探针脚本中的 `VERSION`、`delivery.json` 的 `artifactId` 和 tag。
 
 本机安装到 `/Applications/贴边.app` 时先正常退出旧进程，再安装同一发布产物。验证运行进程的实际可执行路径、Info.plist 中的源码 SHA，以及安装位置下 CLI 的 `--help`、Skill 资源和临时目录里的 Skill 安装/启动脚本。确认包内无 `edgepeek-mcp` 可执行文件。不要从源码工作区另建一个包冒充刚发布的产物。
 

@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "targets": [
+    {
+      "id": "github-release",
+      "kind": "command",
+      "command": "python3",
+      "args": [
+        "scripts/verify_github_release.py",
+        "{commit}"
+      ],
+      "artifactId": "sofish/tiebian@v1.3.0",
+      "state": "VALID"
+    }
+  ]
+}

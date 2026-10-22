@@ -33,6 +33,34 @@ final class NoteTagTests: XCTestCase {
     func testMarkdownHeadingIsNotATag() {
         XCTAssertEqual(NoteText.tags(in: "# 标题\n## 二级标题"), [])
     }
+
+    func testReplacingPrimaryTagKeepsTheRestOfTheNote() {
+        XCTAssertEqual(
+            NoteText.replacingPrimaryTag(in: "标题\n正文 #工作", with: "#灵感"),
+            "标题\n正文 #灵感"
+        )
+        XCTAssertEqual(
+            NoteText.replacingPrimaryTag(in: "标题\n#工作\n#灵感", with: "#生活"),
+            "标题\n#生活\n#灵感"
+        )
+        // A colour value is not a tag and must not be rewritten.
+        XCTAssertEqual(
+            NoteText.replacingPrimaryTag(in: "颜色 #C96F45", with: "#灵感"),
+            "颜色 #C96F45\n#灵感"
+        )
+    }
+
+    func testRemovingPrimaryTagLeavesAStandaloneSheet() {
+        XCTAssertEqual(
+            NoteText.replacingPrimaryTag(in: "标题\n#工作", with: nil),
+            "标题"
+        )
+        XCTAssertEqual(
+            NoteText.replacingPrimaryTag(in: "标题 #工作 后文\n#灵感", with: nil),
+            "标题 后文\n#灵感"
+        )
+        XCTAssertEqual(NoteText.replacingPrimaryTag(in: "没有标签", with: nil), "没有标签")
+    }
 }
 
 final class StickyNoteCodableTests: XCTestCase {
@@ -125,6 +153,38 @@ final class NoteGroupingTests: XCTestCase {
         store.setColor(id: fourth.id, color: .lilac)
         XCTAssertEqual(store.note(with: fourth.id)?.color, .lilac)
         XCTAssertEqual(store.note(with: third.id)?.color, .sky)
+    }
+
+    func testMovingNoteToAnotherGroupRewritesItsTagAndColour() throws {
+        let (store, directory) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let base = Date()
+        let target = store.addNote(
+            content: "目标\n#灵感",
+            color: .sky,
+            createdAt: base.addingTimeInterval(-60)
+        )
+        let note = store.addNote(
+            content: "待移动\n#工作",
+            color: .apricot,
+            createdAt: base
+        )
+
+        store.setPrimaryTag(id: note.id, tag: "#灵感")
+        XCTAssertEqual(store.note(with: note.id)?.content, "待移动\n#灵感")
+        XCTAssertEqual(store.note(with: note.id)?.color, .sky)
+        XCTAssertEqual(store.noteGroups.map(\.key), ["#灵感"])
+
+        // Dropping on an untagged sheet strips the group tag.
+        store.setPrimaryTag(id: note.id, tag: nil)
+        XCTAssertEqual(store.note(with: note.id)?.content, "待移动")
+        XCTAssertNil(NoteText.primaryTag(in: store.note(with: note.id)!.content))
+
+        store.saveNow()
+        let reloaded = NoteStore(fileURL: store.fileURL, seedIfMissing: false)
+        XCTAssertEqual(reloaded.note(with: note.id)?.content, "待移动")
+        XCTAssertEqual(reloaded.note(with: target.id)?.content, "目标\n#灵感")
     }
 
     func testEveryUntaggedNoteIsItsOwnGroup() throws {

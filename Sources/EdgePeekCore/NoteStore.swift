@@ -121,6 +121,17 @@ public final class NoteStore: ObservableObject {
         scheduleSave()
     }
 
+    /// Move a note to another group by rewriting its primary hashtag. `nil`
+    /// removes the tag, which is how a card joins the untagged sheets.
+    public func setPrimaryTag(id: UUID, tag: String?) {
+        guard let note = note(with: id) else { return }
+        guard NoteText.primaryTagKey(in: note.content) != tag?.lowercased() else { return }
+        updateContent(
+            id: id,
+            content: NoteText.replacingPrimaryTag(in: note.content, with: tag)
+        )
+    }
+
     public var overdueNotes: [StickyNote] {
         notes.filter { $0.isOverdue }
     }

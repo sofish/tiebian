@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from build_app import populate_bundle, signing_arguments, verify_universal
 from package_release import notary_credentials, notarize, verify_source
+from verify_github_release import checksum, release_state, verify_proof
 
 
 class ReleaseTests(unittest.TestCase):
@@ -82,6 +83,36 @@ class ReleaseTests(unittest.TestCase):
             with patch("package_release.capture", return_value=json.dumps({"id": "submission", "status": status})):
                 with self.assertRaisesRegex(RuntimeError, "Notarization failed"):
                     notarize(Path("app.zip"), ["--keychain-profile", "release"])
+
+    def test_github_release_probe_checks_source_and_asset_hashes(self):
+        commit = "a" * 40
+        with tempfile.TemporaryDirectory() as temporary:
+            files = Path(temporary)
+            (files / "EdgePeek.zip").write_bytes(b"zip")
+            (files / "EdgePeek.dmg").write_bytes(b"dmg")
+            proof = {
+                "sourceCommit": commit,
+                "assets": {
+                    "EdgePeek.zip": checksum(files / "EdgePeek.zip"),
+                    "EdgePeek.dmg": checksum(files / "EdgePeek.dmg"),
+                },
+            }
+            verify_proof(commit, proof, files)
+            with self.assertRaisesRegex(RuntimeError, "sourceCommit"):
+                verify_proof("b" * 40, proof, files)
+            (files / "EdgePeek.dmg").write_bytes(b"tampered")
+            with self.assertRaisesRegex(RuntimeError, "Checksum mismatch"):
+                verify_proof(commit, proof, files)
+            (files / "EdgePeek.dmg").unlink()
+            with self.assertRaisesRegex(RuntimeError, "Missing release asset"):
+                verify_proof(commit, proof, files)
+
+    def test_github_release_probe_rejects_unpublished_states(self):
+        self.assertEqual(release_state({"isDraft": False, "isPrerelease": False}), "VALID")
+        with self.assertRaisesRegex(RuntimeError, "draft"):
+            release_state({"isDraft": True, "isPrerelease": False})
+        with self.assertRaisesRegex(RuntimeError, "prerelease"):
+            release_state({"isDraft": False, "isPrerelease": True})
 
 
 if __name__ == "__main__":

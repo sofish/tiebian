@@ -14,9 +14,9 @@ struct GroupEntity: Identifiable {
     var count: Int { notes.count }
     var displayTag: String { tag ?? "" }
 
-    /// A column reads from the oldest note to the newest. Pinned notes stay
-    /// near the top, where they can be seen without unfolding the column.
-    var notesForColumn: [StickyNote] {
+    /// A group reads from the oldest note to the newest. Pinned notes stay
+    /// first, where they can be seen without unfolding the stack.
+    var orderedNotes: [StickyNote] {
         notes.sorted { lhs, rhs in
             if lhs.isPinned != rhs.isPinned {
                 return lhs.isPinned
@@ -109,6 +109,7 @@ enum BoardMetrics {
     static let boardPadding: CGFloat = 20
     static let pagerHeight: CGFloat = 34
     static let naturalStep: CGFloat = cardHeight + cardGap
+    static let naturalRowStep: CGFloat = cardWidth + cardGap
     static let minimumStep: CGFloat = 4
     static let maximumWidthRatioVertical: CGFloat = 0.86
     static let maximumWidthRatioHorizontal: CGFloat = 0.90
@@ -126,9 +127,14 @@ struct BoardCardPlacement: Identifiable {
 struct BoardGroupPlacement: Identifiable {
     let entity: GroupEntity
     let page: Int
-    let column: Int
+    /// Cross-axis position on the page: a row index for vertical seams and a
+    /// column index for horizontal seams.
+    let slot: Int
     let labelFrame: CGRect
     let cards: [BoardCardPlacement]
+    /// Forgiving drop zone for dragging a card onto this group. Rows accept
+    /// the whole band across the page; columns accept the whole height.
+    let dropFrame: CGRect
     var id: String { entity.key }
 }
 
@@ -136,12 +142,14 @@ struct GroupBoardLayout {
     let entities: [GroupEntity]
     let groups: [BoardGroupPlacement]
     let pageCount: Int
-    let columnsPerPage: Int
     let pageSize: CGSize
     let pages: [Int: [BoardGroupPlacement]]
-    let commonHeight: CGFloat
 
     var hasPager: Bool { pageCount > 1 }
+
+    func group(at point: CGPoint, page: Int) -> BoardGroupPlacement? {
+        (pages[page] ?? []).first { $0.dropFrame.contains(point) }
+    }
 
     static func make(
         entities: [GroupEntity],
@@ -153,10 +161,8 @@ struct GroupBoardLayout {
                 entities: [],
                 groups: [],
                 pageCount: 1,
-                columnsPerPage: 1,
                 pageSize: CGSize(width: 320, height: 220),
-                pages: [:],
-                commonHeight: 150
+                pages: [:]
             )
         }
 
@@ -177,6 +183,177 @@ struct GroupBoardLayout {
             )
         )
 
+        return edge.isVertical
+            ? makeRows(
+                entities: entities,
+                edge: edge,
+                maxBoardWidth: maxBoardWidth,
+                maxBoardHeight: maxBoardHeight
+            )
+            : makeColumns(
+                entities: entities,
+                edge: edge,
+                maxBoardWidth: maxBoardWidth,
+                maxBoardHeight: maxBoardHeight
+            )
+    }
+
+    /// Fit the longest group into the available extent by compressing only the
+    /// gaps between cards; full card size is the preferred state.
+    private static func compressedStep(
+        count: Int,
+        cardExtent: CGFloat,
+        availableExtent: CGFloat,
+        naturalStep: CGFloat
+    ) -> CGFloat {
+        guard count > 1 else { return naturalStep }
+        let naturalExtent = cardExtent + CGFloat(count - 1) * naturalStep
+        guard naturalExtent > availableExtent else { return naturalStep }
+        return max(
+            BoardMetrics.minimumStep,
+            (availableExtent - cardExtent) / CGFloat(count - 1)
+        )
+    }
+
+    private static func pagedGroups(
+        _ groups: [BoardGroupPlacement]
+    ) -> [Int: [BoardGroupPlacement]] {
+        Dictionary(grouping: groups, by: \.page)
+    }
+
+    /// Left/right seams read as rows: cards run horizontally, the label stays
+    /// above the row, and rows hug the attached edge.
+    private static func makeRows(
+        entities: [GroupEntity],
+        edge: EdgeSide,
+        maxBoardWidth: CGFloat,
+        maxBoardHeight: CGFloat
+    ) -> GroupBoardLayout {
+        let maxCount = entities.lazy.map(\.count).max() ?? 1
+        let availableWidth = max(
+            BoardMetrics.cardWidth,
+            maxBoardWidth - BoardMetrics.boardPadding * 2
+        )
+        let step = compressedStep(
+            count: maxCount,
+            cardExtent: BoardMetrics.cardWidth,
+            availableExtent: availableWidth,
+            naturalStep: BoardMetrics.naturalRowStep
+        )
+        let maxRowWidth = BoardMetrics.cardWidth
+            + CGFloat(max(0, maxCount - 1)) * step
+        let rowHeight = BoardMetrics.labelHeight + BoardMetrics.labelGap
+            + BoardMetrics.cardHeight
+        let rowStride = rowHeight + BoardMetrics.groupGap
+        let availableHeight = max(
+            rowHeight,
+            maxBoardHeight - BoardMetrics.boardPadding * 2
+        )
+
+        func rowsPerPage(reservingPager: Bool) -> Int {
+            let height = reservingPager
+                ? availableHeight - BoardMetrics.pagerHeight
+                : availableHeight
+            return max(
+                1,
+                Int(floor(
+                    (max(rowHeight, height) + BoardMetrics.groupGap) / rowStride
+                ))
+            )
+        }
+
+        var slotsPerPage = min(rowsPerPage(reservingPager: false), entities.count)
+        var pageCount = max(
+            1,
+            Int(ceil(Double(entities.count) / Double(slotsPerPage)))
+        )
+        if pageCount > 1 {
+            slotsPerPage = rowsPerPage(reservingPager: true)
+            pageCount = max(
+                1,
+                Int(ceil(Double(entities.count) / Double(slotsPerPage)))
+            )
+        }
+
+        let rowsOnPage = pageCount > 1 ? slotsPerPage : entities.count
+        let pageWidth = ceil(BoardMetrics.boardPadding * 2 + maxRowWidth)
+        let pageHeight = ceil(
+            BoardMetrics.boardPadding * 2
+                + CGFloat(rowsOnPage) * rowHeight
+                + CGFloat(max(0, rowsOnPage - 1)) * BoardMetrics.groupGap
+                + (pageCount > 1 ? BoardMetrics.pagerHeight : 0)
+        )
+
+        var groups: [BoardGroupPlacement] = []
+        for (index, entity) in entities.enumerated() {
+            let page = index / slotsPerPage
+            let slot = index % slotsPerPage
+            let rowWidth = BoardMetrics.cardWidth
+                + CGFloat(max(0, entity.count - 1)) * step
+            let rowX = edge == .right
+                ? pageWidth - BoardMetrics.boardPadding - rowWidth
+                : BoardMetrics.boardPadding
+            let rowY = BoardMetrics.boardPadding + CGFloat(slot) * rowStride
+            let labelFrame = CGRect(
+                x: rowX,
+                y: rowY,
+                width: rowWidth,
+                height: BoardMetrics.labelHeight
+            )
+            let cardY = rowY + BoardMetrics.labelHeight + BoardMetrics.labelGap
+            let notes = entity.orderedNotes
+
+            var cards: [BoardCardPlacement] = []
+            for (noteIndex, note) in notes.enumerated() {
+                cards.append(
+                    BoardCardPlacement(
+                        note: note,
+                        frame: CGRect(
+                            x: rowX + CGFloat(noteIndex) * step,
+                            y: cardY,
+                            width: BoardMetrics.cardWidth,
+                            height: BoardMetrics.cardHeight
+                        ),
+                        rotation: entity.angle
+                    )
+                )
+            }
+
+            groups.append(
+                BoardGroupPlacement(
+                    entity: entity,
+                    page: page,
+                    slot: slot,
+                    labelFrame: labelFrame,
+                    cards: cards,
+                    dropFrame: CGRect(
+                        x: 0,
+                        y: rowY - BoardMetrics.groupGap / 2,
+                        width: pageWidth,
+                        height: rowHeight + BoardMetrics.groupGap
+                    )
+                )
+            )
+        }
+
+        return GroupBoardLayout(
+            entities: entities,
+            groups: groups,
+            pageCount: pageCount,
+            pageSize: CGSize(width: pageWidth, height: pageHeight),
+            pages: pagedGroups(groups)
+        )
+    }
+
+    /// Top/bottom seams read as columns: cards run vertically, the label stays
+    /// above the column, and short columns hug the attached edge instead of
+    /// floating in the middle.
+    private static func makeColumns(
+        entities: [GroupEntity],
+        edge: EdgeSide,
+        maxBoardWidth: CGFloat,
+        maxBoardHeight: CGFloat
+    ) -> GroupBoardLayout {
         let capacityGuess = max(
             1,
             Int(
@@ -197,53 +374,50 @@ struct GroupBoardLayout {
                 - BoardMetrics.labelHeight - BoardMetrics.labelGap
         )
 
-        let maxCount = entities.map(\.count).max() ?? 1
-        let step: CGFloat
-        if maxCount <= 1 {
-            step = BoardMetrics.naturalStep
-        } else {
-            let naturalHeight = BoardMetrics.cardHeight
-                + CGFloat(maxCount - 1) * BoardMetrics.naturalStep
-            if naturalHeight <= availableHeight {
-                step = BoardMetrics.naturalStep
-            } else {
-                let fitStep = (availableHeight - BoardMetrics.cardHeight)
-                    / CGFloat(maxCount - 1)
-                step = max(BoardMetrics.minimumStep, fitStep)
-            }
-        }
-        let commonHeight = BoardMetrics.cardHeight
+        let maxCount = entities.lazy.map(\.count).max() ?? 1
+        let step = compressedStep(
+            count: maxCount,
+            cardExtent: BoardMetrics.cardHeight,
+            availableExtent: availableHeight,
+            naturalStep: BoardMetrics.naturalStep
+        )
+        let tallestStack = BoardMetrics.cardHeight
             + CGFloat(max(0, maxCount - 1)) * step
+        let blockHeight = BoardMetrics.labelHeight + BoardMetrics.labelGap
+            + tallestStack
 
-        let columnsPerPage = min(capacityGuess, entities.count)
+        let slotsPerPage = min(capacityGuess, entities.count)
         let pageCount = max(
             1,
-            Int(ceil(Double(entities.count) / Double(columnsPerPage)))
+            Int(ceil(Double(entities.count) / Double(slotsPerPage)))
         )
-        let pageColumns = pageCount > 1 ? columnsPerPage : entities.count
-        let pageWidth = BoardMetrics.boardPadding * 2
-            + CGFloat(pageColumns) * BoardMetrics.columnWidth
-            + CGFloat(max(0, pageColumns - 1)) * BoardMetrics.groupGap
-        let pageHeight = BoardMetrics.boardPadding * 2
-            + BoardMetrics.labelHeight + BoardMetrics.labelGap
-            + commonHeight
-            + (pageCount > 1 ? BoardMetrics.pagerHeight : 0)
+        let columnsOnPage = pageCount > 1 ? slotsPerPage : entities.count
+        let pageWidth = ceil(
+            BoardMetrics.boardPadding * 2
+                + CGFloat(columnsOnPage) * BoardMetrics.columnWidth
+                + CGFloat(max(0, columnsOnPage - 1)) * BoardMetrics.groupGap
+        )
+        let pageHeight = ceil(
+            BoardMetrics.boardPadding * 2
+                + blockHeight
+                + (pageCount > 1 ? BoardMetrics.pagerHeight : 0)
+        )
+        let contentHeight = pageHeight
+            - (pageCount > 1 ? BoardMetrics.pagerHeight : 0)
 
         var groups: [BoardGroupPlacement] = []
         for (index, entity) in entities.enumerated() {
-            let page = index / columnsPerPage
-            let pageColumn = index % columnsPerPage
-            let displayedColumn = edge == .right
-                ? (pageColumns - 1 - pageColumn)
-                : pageColumn
+            let page = index / slotsPerPage
+            let slot = index % slotsPerPage
             let columnX = BoardMetrics.boardPadding
-                + CGFloat(displayedColumn) * (BoardMetrics.columnWidth + BoardMetrics.groupGap)
+                + CGFloat(slot) * (BoardMetrics.columnWidth + BoardMetrics.groupGap)
 
-            let notes = entity.notesForColumn
+            let notes = entity.orderedNotes
             let stackHeight = BoardMetrics.cardHeight
                 + CGFloat(max(0, notes.count - 1)) * step
-            let groupTop = BoardMetrics.boardPadding
-                + (commonHeight - stackHeight) / 2
+            let groupTop = edge == .bottom
+                ? BoardMetrics.boardPadding + tallestStack - stackHeight
+                : BoardMetrics.boardPadding
             let stackTop = groupTop + BoardMetrics.labelHeight + BoardMetrics.labelGap
 
             let labelFrame = CGRect(
@@ -273,29 +447,25 @@ struct GroupBoardLayout {
                 BoardGroupPlacement(
                     entity: entity,
                     page: page,
-                    column: displayedColumn,
+                    slot: slot,
                     labelFrame: labelFrame,
-                    cards: cards
+                    cards: cards,
+                    dropFrame: CGRect(
+                        x: columnX - BoardMetrics.groupGap / 2,
+                        y: 0,
+                        width: BoardMetrics.cardWidth + BoardMetrics.groupGap,
+                        height: contentHeight
+                    )
                 )
             )
-        }
-
-        var pages: [Int: [BoardGroupPlacement]] = [:]
-        for group in groups {
-            pages[group.page, default: []].append(group)
         }
 
         return GroupBoardLayout(
             entities: entities,
             groups: groups,
             pageCount: pageCount,
-            columnsPerPage: pageColumns,
-            pageSize: CGSize(
-                width: ceil(pageWidth),
-                height: ceil(pageHeight)
-            ),
-            pages: pages,
-            commonHeight: ceil(commonHeight)
+            pageSize: CGSize(width: pageWidth, height: pageHeight),
+            pages: pagedGroups(groups)
         )
     }
 }

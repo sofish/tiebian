@@ -57,6 +57,40 @@ final class BoardCardDragTests: XCTestCase {
                        snapshot.dueAt?.timeIntervalSince1970 ?? 0, accuracy: 1)
     }
 
+    func testDroppingCardOnAnotherGroupChangesItsTag() async throws {
+        _ = NSApplication.shared
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EdgePeekCardRetagTests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = NoteStore(fileURL: directory.appendingPathComponent("notes.json"), seedIfMissing: false)
+        let target = store.addNote(content: "目标\n#灵感", color: .sky)
+        let note = store.addNote(content: "移动我\n#工作", color: .rose)
+        var pointer = CGPoint(x: 100_000, y: 100_000)
+        let controller = EdgeController(store: store, mouseLocation: { pointer })
+        defer { controller.shutdown() }
+        let seam = try XCTUnwrap(NSApp.windows.first {
+            ($0.contentView as? NSHostingView<SeamView>)?.rootView.state === controller.seamState
+        })
+        pointer = CGPoint(x: seam.frame.midX, y: seam.frame.midY)
+        try await Task.sleep(for: .milliseconds(400))
+        let board = try XCTUnwrap(NSApp.windows.first {
+            $0.isVisible && $0.contentView is FirstMouseHostingView<AnyView>
+        })
+        let layout = try XCTUnwrap(controller.boardLayout)
+        let targetGroup = try XCTUnwrap(layout.groups.first { $0.entity.tag == "#灵感" })
+        let local = CGPoint(x: targetGroup.labelFrame.midX, y: targetGroup.labelFrame.midY)
+        let drop = CGPoint(x: board.frame.minX + local.x, y: board.frame.maxY - local.y)
+
+        controller.cardDragBegan(noteID: note.id)
+        controller.cardDragEnded(noteID: note.id, at: drop, cancelled: false)
+
+        let moved = try XCTUnwrap(store.note(with: note.id))
+        XCTAssertEqual(NoteText.primaryTag(in: moved.content), "#灵感")
+        XCTAssertEqual(moved.content, "移动我\n#灵感")
+        XCTAssertEqual(moved.color, .sky)
+        XCTAssertEqual(store.note(with: target.id)?.content, "目标\n#灵感")
+    }
+
     func testNativeCardClickOpensOnlyAfterInsideMouseRelease() throws {
         _ = NSApplication.shared
         let panel = PanelFactory.make(frame: NSRect(x: 0, y: 0, width: 248, height: 92), keyable: false)

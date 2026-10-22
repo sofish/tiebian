@@ -22,7 +22,8 @@ final class EdgeController: NSObject {
     private var boardHeldOpen = false
     private var draggedCardID: UUID?
     private let cardUndoToast = UndoToastController()
-    private var boardLayout: GroupBoardLayout?
+    private(set) var boardLayout: GroupBoardLayout?
+    let boardPageState = BoardPageState()
 
     private var previewPanel: NSPanel?
     private var previewHost: NSHostingView<AnyView>?
@@ -601,11 +602,13 @@ final class EdgeController: NSObject {
         let panel = PanelFactory.make(frame: start, keyable: false)
         panel.hasShadow = false
         panel.level = .screenSaver
+        boardPageState.reset()
         let root = AnyView(
             GroupBoardView(
                 layout: layout,
                 edge: anchor.edge,
-                actions: boardActions()
+                actions: boardActions(),
+                pageState: boardPageState
             )
         )
         let host = FirstMouseHostingView(rootView: root)
@@ -683,13 +686,15 @@ final class EdgeController: NSObject {
             edge: anchor.edge,
             screenSize: currentScreen.visibleFrame.size
         )
+        boardPageState.clamp(to: layout.pageCount)
         let size = layout.pageSize
         let frame = boardFrame(size: size, screen: currentScreen)
         let root = AnyView(
             GroupBoardView(
                 layout: layout,
                 edge: anchor.edge,
-                actions: boardActions()
+                actions: boardActions(),
+                pageState: boardPageState
             )
         )
 
@@ -733,12 +738,23 @@ final class EdgeController: NSObject {
     func cardDragEnded(noteID: UUID, at point: CGPoint, cancelled: Bool) {
         guard draggedCardID == noteID else { return }
         draggedCardID = nil
-        if !cancelled, boardVisible, let frame = boardPanel?.frame,
-           !frame.insetBy(dx: -24, dy: -24).contains(point),
-           let note = store.note(with: noteID) {
-            cardUndoToast.delete(note, from: store, on: currentScreen)
+        if !cancelled, boardVisible, let frame = boardPanel?.frame {
+            if frame.insetBy(dx: -24, dy: -24).contains(point) {
+                retagNote(noteID: noteID, atScreenPoint: point)
+            } else if let note = store.note(with: noteID) {
+                cardUndoToast.delete(note, from: store, on: currentScreen)
+            }
         }
         if !isMouseInsideBoard(), !isMouseInsideSeam() { scheduleClose(after: 0.3) }
+    }
+
+    /// Dropping a card on another group rewrites its primary hashtag. Empty
+    /// board space or its own group leaves the note where it was.
+    private func retagNote(noteID: UUID, atScreenPoint point: CGPoint) {
+        guard let frame = boardPanel?.frame, let layout = boardLayout else { return }
+        let local = CGPoint(x: point.x - frame.minX, y: frame.maxY - point.y)
+        guard let target = layout.group(at: local, page: boardPageState.page) else { return }
+        store.setPrimaryTag(id: noteID, tag: target.entity.tag)
     }
 
     private func boardFrame(size: CGSize, screen: NSScreen) -> CGRect {

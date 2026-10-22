@@ -342,21 +342,14 @@ public enum NoteText {
     /// Hashtags are lowercase-insensitive group keys. Hex colour values such as
     /// `#C96F45` are deliberately not treated as tags.
     public static func tags(in content: String) -> [String] {
-        let pattern = "#([\\p{L}\\p{N}_\\-]{1,32})"
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
-        let range = NSRange(location: 0, length: (content as NSString).length)
-        let matches = regex.matches(in: content, range: range)
         var seen = Set<String>()
         var tags: [String] = []
 
-        for match in matches {
-            guard match.numberOfRanges > 1 else { continue }
-            let token = (content as NSString).substring(with: match.range(at: 1))
-            guard !isHexColor(token) else { continue }
-            let key = token.lowercased()
+        for match in hashtagMatches(in: content) {
+            let key = match.token.lowercased()
             guard !seen.contains(key) else { continue }
             seen.insert(key)
-            tags.append("#" + token)
+            tags.append("#" + match.token)
         }
         return tags
     }
@@ -375,6 +368,34 @@ public enum NoteText {
         primaryTag(in: content)?.lowercased()
     }
 
+    /// Rewrite the hashtag that decides the note's group. Passing `nil` strips
+    /// that tag so the note becomes a standalone sheet. Other hashtags and the
+    /// rest of the note stay untouched, which is what dragging a card onto
+    /// another group does.
+    public static func replacingPrimaryTag(in content: String, with tag: String?) -> String {
+        let text = content as NSString
+        guard let match = hashtagMatches(in: content).first else {
+            guard let tag else { return content }
+            guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return tag
+            }
+            return content.hasSuffix("\n") ? content + tag : content + "\n" + tag
+        }
+
+        guard let tag else {
+            return text
+                .replacingCharacters(in: match.range, with: "")
+                .replacingOccurrences(of: "[ \\t]{2,}", with: " ",
+                                      options: .regularExpression)
+                .replacingOccurrences(of: "[ \\t]+\\n", with: "\n",
+                                      options: .regularExpression)
+                .replacingOccurrences(of: "\\n{3,}", with: "\n\n",
+                                      options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return text.replacingCharacters(in: match.range, with: tag)
+    }
+
     /// A new note that only carries its group's hashtag should still be
     /// discarded when the person closes the editor without writing anything.
     public static func isEffectivelyEmpty(_ content: String) -> Bool {
@@ -383,6 +404,24 @@ public enum NoteText {
             text = text.replacingOccurrences(of: tag, with: "")
         }
         return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private static let hashtagRegex = try? NSRegularExpression(
+        pattern: "#[\\p{L}\\p{N}_\\-]{1,32}"
+    )
+
+    /// One scanner for grouping and retagging, so the two cannot drift apart.
+    private static func hashtagMatches(
+        in content: String
+    ) -> [(range: NSRange, token: String)] {
+        guard let regex = hashtagRegex else { return [] }
+        let text = content as NSString
+        let range = NSRange(location: 0, length: text.length)
+        return regex.matches(in: content, range: range).compactMap { match in
+            let token = String(text.substring(with: match.range).dropFirst())
+            guard !isHexColor(token) else { return nil }
+            return (match.range, token)
+        }
     }
 
     private static func isHexColor(_ token: String) -> Bool {

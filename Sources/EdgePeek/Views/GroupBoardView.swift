@@ -10,14 +10,38 @@ struct BoardActions {
     var cardDragEnded: (UUID, CGPoint, Bool) -> Void = { _, _, _ in }
 }
 
+/// Board pages live outside the SwiftUI view so a note move can rebuild the
+/// board without resetting the page, and so drop targeting knows which page
+/// the person is looking at.
+@MainActor
+final class BoardPageState: ObservableObject {
+    @Published private(set) var page = 0
+
+    func go(to newPage: Int, pageCount: Int) {
+        let clamped = min(max(0, newPage), max(0, pageCount - 1))
+        guard clamped != page else { return }
+        page = clamped
+    }
+
+    func clamp(to pageCount: Int) {
+        go(to: page, pageCount: pageCount)
+    }
+
+    func reset() {
+        go(to: 0, pageCount: 1)
+    }
+}
+
 struct GroupBoardView: View {
     let layout: GroupBoardLayout
     let edge: EdgeSide
     let actions: BoardActions
+    @ObservedObject var pageState: BoardPageState
 
-    @State private var page = 0
     @State private var appeared = false
     @State private var hoveredNoteID: UUID?
+
+    private var page: Int { pageState.page }
 
     private var contentHeight: CGFloat {
         layout.pageSize.height - (layout.hasPager ? BoardMetrics.pagerHeight : 0)
@@ -59,7 +83,7 @@ struct GroupBoardView: View {
             }
         }
         .onChange(of: layout.pageCount) { _, count in
-            page = min(page, max(0, count - 1))
+            pageState.clamp(to: count)
         }
     }
 
@@ -67,6 +91,7 @@ struct GroupBoardView: View {
 
     private func groupLabel(_ group: BoardGroupPlacement) -> some View {
         let tag = group.entity.displayTag
+        let labelAlignment: Alignment = edge == .right ? .trailing : .leading
 
         return VStack(alignment: .leading, spacing: 4) {
             if tag.isEmpty {
@@ -105,7 +130,7 @@ struct GroupBoardView: View {
         .frame(
             width: group.labelFrame.width,
             height: group.labelFrame.height,
-            alignment: .leading
+            alignment: labelAlignment
         )
         .position(
             x: group.labelFrame.midX,
@@ -113,7 +138,7 @@ struct GroupBoardView: View {
         )
         .opacity(appeared ? 1 : 0)
         .animation(
-            Theme.spring.delay(min(Double(group.column) * 0.04, 0.22)),
+            Theme.spring.delay(min(Double(group.slot) * 0.04, 0.22)),
             value: appeared
         )
     }
@@ -148,7 +173,7 @@ struct GroupBoardView: View {
             y: card.frame.midY
         )
         .offset(y: hovered ? -3 : 0)
-        .zIndex(hovered ? 10_000 : Double(group.column * 100 + index))
+        .zIndex(hovered ? 10_000 : Double(group.slot * 100 + index))
         .opacity(appeared ? 1 : 0)
         .offset(
             x: appeared ? 0 : edgeInwardOffset.width,
@@ -156,7 +181,7 @@ struct GroupBoardView: View {
         )
         .animation(
             Theme.spring.delay(
-                min(Double(group.column) * 0.035 + Double(index) * 0.018, 0.28)
+                min(Double(group.slot) * 0.035 + Double(index) * 0.018, 0.28)
             ),
             value: appeared
         )
@@ -216,7 +241,7 @@ struct GroupBoardView: View {
     private func goToPage(_ newPage: Int) {
         hoveredNoteID = nil
         withAnimation(Theme.quickSpring) {
-            page = min(max(0, newPage), layout.pageCount - 1)
+            pageState.go(to: newPage, pageCount: layout.pageCount)
         }
     }
 
