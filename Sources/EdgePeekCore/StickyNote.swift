@@ -68,6 +68,12 @@ public struct StickyNote: Identifiable, Codable, Equatable, Sendable {
         NoteText.excerpt(from: content)
     }
 
+    /// The whole note as one paper block. Cards no longer elevate the first
+    /// line into a title, so this is what fills their available height.
+    public var displayText: String {
+        NoteText.displayText(from: content)
+    }
+
     /// The note as it should read on paper: no Markdown punctuation, but
     /// bullets and checkboxes are kept as friendly glyphs. The editor is a
     /// WYSIWYG surface, so this is also where legacy Markdown is softened the
@@ -300,6 +306,38 @@ public enum NoteText {
         }
         while result.last?.kind == .empty { result.removeLast() }
         return result
+    }
+
+    /// The entire note rendered as plain paper copy, with no implicit
+    /// title/body split. This is what fills a card: every line counts, and
+    /// tag-only lines are left to the group header instead of eating space.
+    public static func displayText(from content: String) -> String {
+        var output: [String] = []
+        for line in lines(from: content) {
+            switch line.kind {
+            case .heading, .text, .quote:
+                guard !isOnlyTags(line.text) else { continue }
+                output.append(cleanInline(line.text))
+            case .checkbox(let checked):
+                output.append((checked ? "☑ " : "☐ ") + cleanInline(line.text))
+            case .bullet:
+                guard !isOnlyTags(line.text) else { continue }
+                output.append("• " + cleanInline(line.text))
+            case .divider, .empty:
+                output.append("")
+            case .code:
+                output.append(line.text)
+            }
+        }
+
+        while output.first == "" { output.removeFirst() }
+        while output.last == "" { output.removeLast() }
+        var collapsed: [String] = []
+        for line in output {
+            if line.isEmpty, collapsed.last?.isEmpty == true { continue }
+            collapsed.append(line)
+        }
+        return collapsed.joined(separator: "\n")
     }
 
     public static func isOnlyTags(_ text: String) -> Bool {

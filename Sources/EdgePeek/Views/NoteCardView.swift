@@ -11,18 +11,26 @@ struct NoteCardView: View {
     let onTogglePin: () -> Void
     let onSetDue: (Date?) -> Void
     let onDragBegan: () -> Void
+    let onDragMoved: (CGPoint) -> Void
     let onDragEnded: (CGPoint, Bool) -> Void
 
-    private var title: String {
-        let value = note.displayTitle
-        return value.isEmpty ? "空白便签" : value
-    }
+    private static let contentSize: CGFloat = 10.8
+    private static let contentSpacing: CGFloat = 1.5
+    private static let contentTopPadding: CGFloat = 9
+    private static let contentBottomPadding: CGFloat = 7
+    private static let footerHeight: CGFloat = 10
+    private static let placeholder = "轻点，写下一点什么。"
 
-    private var excerpt: String {
-        let text = note.excerpt
-        if !text.isEmpty { return text }
-        return note.plainText.isEmpty ? "轻点，写下一点什么。" : ""
-    }
+    /// Fit as many wrapped content lines as the paper can hold. The first
+    /// line is no longer a title, so nothing is reserved above the text.
+    private static let contentLineLimit: Int = {
+        let available = BoardMetrics.cardHeight
+            - contentTopPadding
+            - contentBottomPadding
+            - footerHeight
+        let lineHeight = AppTypography.lineHeight(size: contentSize, spacing: contentSpacing)
+        return max(2, Int(floor((available + contentSpacing) / lineHeight)))
+    }()
 
     var body: some View {
         card
@@ -38,7 +46,10 @@ struct NoteCardView: View {
         .overlay {
             NoteCardDragSurface(noteID: note.id,
                                 image: { ImageRenderer(content: card).nsImage },
-                                onOpen: onOpen, onDragBegan: onDragBegan, onDragEnded: onDragEnded)
+                                onOpen: onOpen,
+                                onDragBegan: onDragBegan,
+                                onDragMoved: onDragMoved,
+                                onDragEnded: onDragEnded)
         }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
@@ -77,46 +88,19 @@ struct NoteCardView: View {
     }
 
     private var card: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: 5) {
-                MixedText(
-                    title,
-                    size: 16,
-                    weight: .medium,
-                    color: Theme.ink,
-                    lineLimit: 1
-                )
+        let text = note.displayText
+        let isEmpty = text.isEmpty
+        return VStack(alignment: .leading, spacing: 0) {
+            MixedText(
+                isEmpty ? Self.placeholder : text,
+                size: Self.contentSize,
+                color: isEmpty ? Theme.inkFaint : Theme.ink,
+                lineSpacing: Self.contentSpacing,
+                lineLimit: Self.contentLineLimit
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-                if note.isPinned {
-                    Image(systemName: "pin.fill")
-                        .font(.system(size: 6.4, weight: .semibold))
-                        .foregroundStyle(Theme.inkSoft)
-                }
-
-                Spacer(minLength: 5)
-
-                if note.isOverdue {
-                    // Reserved space for the single ink stamp, so a long title
-                    // never runs underneath it.
-                    Spacer()
-                        .frame(width: 36)
-                } else if let dueAt = note.dueAt {
-                    DueBadge(date: dueAt)
-                }
-            }
-
-            if !excerpt.isEmpty {
-                MixedText(
-                    excerpt,
-                    size: 11.2,
-                    color: Theme.inkSoft,
-                    lineSpacing: 3,
-                    lineLimit: 2
-                )
-                .padding(.top, 5)
-            }
-
-            Spacer(minLength: 2)
+            Spacer(minLength: 0)
 
             HStack(spacing: 5) {
                 MixedText(
@@ -127,26 +111,38 @@ struct NoteCardView: View {
                 )
 
                 Spacer(minLength: 4)
+
+                if note.isPinned {
+                    Image(systemName: "pin.fill")
+                        .font(.system(size: 6.4, weight: .semibold))
+                        .foregroundStyle(Theme.inkSoft)
+                }
+
+                if let dueAt = note.dueAt {
+                    DueBadge(date: dueAt)
+                }
             }
+            .frame(height: Self.footerHeight)
         }
         .padding(.horizontal, 13)
-        .padding(.top, 11)
-        .padding(.bottom, 9)
+        .padding(.top, Self.contentTopPadding)
+        .padding(.bottom, Self.contentBottomPadding)
         .frame(width: BoardMetrics.cardWidth, height: BoardMetrics.cardHeight, alignment: .topLeading)
         .background(
-            ZStack {
+            ZStack(alignment: .topTrailing) {
                 PaperBackground(color: paperColor, cornerRadius: 6)
                 PaperTexture(opacity: 0.025)
+                if note.isOverdue {
+                    // The stamp sits under the copy like ink on paper, so it
+                    // never steals a line from the note itself.
+                    OverdueStamp()
+                        .padding(.top, 7)
+                        .padding(.trailing, 8)
+                        .opacity(0.5)
+                }
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-        .overlay(alignment: .topTrailing) {
-            if note.isOverdue {
-                OverdueStamp()
-                    .padding(.top, 7)
-                    .padding(.trailing, 8)
-            }
-        }
     }
 }
 

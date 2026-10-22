@@ -6,12 +6,13 @@ import EdgePeekCore
 @MainActor
 final class SeamAnimationTests: XCTestCase {
     private func makeLight(edge: EdgeSide = .left, width: CGFloat = 5.4,
-                           mode: SeamAnimation = .flow, due: Bool = false) -> SeamLightLayerView {
+                           mode: SeamAnimation = .flow, due: Bool = false,
+                           count: Int = 6) -> SeamLightLayerView {
         _ = NSApplication.shared
         let seamSize = SeamMetrics.panelSize(edge: edge, length: 440, width: width)
         let frame = SeamGlowGeometry(width: width).frame(around: CGRect(origin: .zero, size: seamSize), edge: edge)
         let view = SeamLightLayerView(frame: CGRect(origin: .zero, size: frame.size))
-        view.configure(.init(edge: edge, width: width, hasDue: due, overdueCount: due ? 2 : 0,
+        view.configure(.init(edge: edge, width: width, hasDue: due, noteCount: count,
                              animation: mode), hovered: false)
         view.layoutSubtreeIfNeeded()
         return view
@@ -33,7 +34,7 @@ final class SeamAnimationTests: XCTestCase {
                 let marker = CABasicAnimation(keyPath: "opacity")
                 marker.duration = 60
                 target.add(marker, forKey: "do-not-restart")
-                view.configure(.init(edge: edge, width: 5.4, hasDue: true, overdueCount: 2,
+                view.configure(.init(edge: edge, width: 5.4, hasDue: true, noteCount: 6,
                                      animation: mode), hovered: true)
                 view.layoutSubtreeIfNeeded()
                 XCTAssertNotNil(target.animation(forKey: "do-not-restart"))
@@ -79,10 +80,11 @@ final class SeamAnimationTests: XCTestCase {
             let move = try XCTUnwrap(flow.animations?.first as? CABasicAnimation)
             XCTAssertEqual(move.keyPath, edge.isVertical ? "transform.translation.y" : "transform.translation.x")
             XCTAssertEqual(move.toValue as? CGFloat, 440)
-            let count = try child("count", of: glow)
+            let count = try XCTUnwrap(child("count", of: glow) as? CATextLayer)
             XCTAssertFalse(count.isHidden)
-            XCTAssertEqual(count.animation(forKey: "count")?.duration, flow.duration * 4)
-            let normal = SeamLightConfiguration(edge: edge, width: 5.4, hasDue: false, overdueCount: 0, animation: .flow)
+            XCTAssertEqual(count.string as? String, "6")
+            XCTAssertNil(count.animation(forKey: "count"))
+            let normal = SeamLightConfiguration(edge: edge, width: 5.4, hasDue: false, noteCount: 6, animation: .flow)
             XCTAssertLessThan(flow.duration, normal.cycle)
         }
     }
@@ -114,14 +116,54 @@ final class SeamAnimationTests: XCTestCase {
             XCTAssertEqual(keyframe.keyPath, "opacity")
             XCTAssertEqual(keyframe.values?.first as? Double, keyframe.values?.last as? Double)
         }
-        XCTAssertTrue(try child("count", of: breathe.layer).isHidden)
+        XCTAssertFalse(try child("count", of: breathe.layer).isHidden)
+    }
+
+    func testLightCountShowsEveryNoteAndTurnsRedOnlyWhenOverdue() throws {
+        let normal = makeLight(due: false)
+        let normalCount = try XCTUnwrap(child("count", of: try child("radiance", of: normal.layer)) as? CATextLayer)
+        XCTAssertEqual(normalCount.string as? String, "6")
+        XCTAssertFalse(normalCount.isHidden)
+        let normalColor = try XCTUnwrap(
+            NSColor(cgColor: try XCTUnwrap(normalCount.foregroundColor))?
+                .usingColorSpace(.sRGB)
+        )
+
+        let overdue = makeLight(due: true)
+        let overdueCount = try XCTUnwrap(child("count", of: try child("radiance", of: overdue.layer)) as? CATextLayer)
+        XCTAssertEqual(overdueCount.string as? String, "6")
+        XCTAssertFalse(overdueCount.isHidden)
+        let overdueColor = try XCTUnwrap(
+            NSColor(cgColor: try XCTUnwrap(overdueCount.foregroundColor))?
+                .usingColorSpace(.sRGB)
+        )
+        XCTAssertGreaterThan(overdueColor.redComponent, overdueColor.greenComponent)
+        XCTAssertGreaterThan(overdueColor.redComponent, overdueColor.blueComponent)
+        XCTAssertGreaterThan(normalColor.greenComponent, 0.9)
+
+        let empty = makeLight(count: 0)
+        XCTAssertTrue(try XCTUnwrap(child("count", of: try child("radiance", of: empty.layer)) as? CATextLayer).isHidden)
+    }
+
+    func testCountOnlyChangeUpdatesTheNumberWithoutRestartingTheGlow() throws {
+        let view = makeLight(due: false)
+        let glow = try child("radiance", of: view.layer)
+        let flow = try XCTUnwrap(glow.animation(forKey: "flow"))
+        view.configure(
+            .init(edge: .left, width: 5.4, hasDue: false, noteCount: 12, animation: .flow),
+            hovered: false
+        )
+        view.layoutSubtreeIfNeeded()
+        let count = try XCTUnwrap(child("count", of: glow) as? CATextLayer)
+        XCTAssertEqual(count.string as? String, "12")
+        XCTAssertTrue(glow.animation(forKey: "flow") === flow)
     }
 
     func testExpandedWindowFollowsSeamWithoutExpandingItsMouseTargetAndDetaches() throws {
         _ = NSApplication.shared
         let seam = PanelFactory.make(frame: CGRect(x: 100, y: 200, width: 440, height: 24), keyable: false)
         let host = SeamLightHostView(frame: CGRect(origin: .zero, size: seam.frame.size))
-        host.configure(.init(edge: .bottom, width: 5.4, hasDue: false, overdueCount: 0, animation: .flow), hovered: false)
+        host.configure(.init(edge: .bottom, width: 5.4, hasDue: false, noteCount: 6, animation: .flow), hovered: false)
         seam.contentView = host
         seam.orderFrontRegardless()
         defer { host.detachLight(); seam.orderOut(nil) }
@@ -139,7 +181,7 @@ final class SeamAnimationTests: XCTestCase {
         seam.setFrameOrigin(CGPoint(x: seam.frame.minX + 50, y: seam.frame.minY + 30))
         XCTAssertEqual(panel.frame.minX - before.x, 50, accuracy: 0.001)
         XCTAssertEqual(panel.frame.minY - before.y, 30, accuracy: 0.001)
-        host.configure(.init(edge: .right, width: 16.2, hasDue: true, overdueCount: 2, animation: .ripple), hovered: false)
+        host.configure(.init(edge: .right, width: 16.2, hasDue: true, noteCount: 6, animation: .ripple), hovered: false)
         seam.setFrame(CGRect(x: 600, y: 100, width: 42, height: 220), display: true)
         host.layoutSubtreeIfNeeded()
         XCTAssertEqual(panel.frame.maxX, seam.frame.maxX)
@@ -192,7 +234,7 @@ final class SeamAnimationTests: XCTestCase {
     func testSwitchingModesClearsWaveStopsAndReparentsTheReminder() throws {
         let view = makeLight(mode: .ripple, due: true)
         for mode in [SeamAnimation.flow, .breathe, .ripple, .flow] {
-            view.configure(.init(edge: .left, width: 5.4, hasDue: true, overdueCount: 2, animation: mode),
+            view.configure(.init(edge: .left, width: 5.4, hasDue: true, noteCount: 6, animation: mode),
                            hovered: false)
             view.layoutSubtreeIfNeeded()
             let glow = try child("radiance", of: view.layer)

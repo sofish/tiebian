@@ -24,6 +24,7 @@ final class EdgeController: NSObject {
     private let cardUndoToast = UndoToastController()
     private(set) var boardLayout: GroupBoardLayout?
     let boardPageState = BoardPageState()
+    let boardDragState = BoardDragState()
 
     private var previewPanel: NSPanel?
     private var previewHost: NSHostingView<AnyView>?
@@ -103,8 +104,7 @@ final class EdgeController: NSObject {
         seamState.edge = anchor.edge
         seamState.width = sizePreference.width
         seamState.animation = sizePreference.animation
-        seamState.hasDueNote = !lastOverdueIDs.isEmpty
-        seamState.overdueCount = lastOverdueIDs.count
+        applyNoteSummary(hasDue: !lastOverdueIDs.isEmpty, count: store.notes.count)
 
         buildSeam()
         observeStore()
@@ -608,7 +608,8 @@ final class EdgeController: NSObject {
                 layout: layout,
                 edge: anchor.edge,
                 actions: boardActions(),
-                pageState: boardPageState
+                pageState: boardPageState,
+                dragState: boardDragState
             )
         )
         let host = FirstMouseHostingView(rootView: root)
@@ -638,6 +639,7 @@ final class EdgeController: NSObject {
     private func closeBoard(animated: Bool) {
         boardHeldOpen = false
         draggedCardID = nil
+        boardDragState.reset()
         cancelOpen()
         cancelClose()
         hidePreview(immediately: true)
@@ -694,7 +696,8 @@ final class EdgeController: NSObject {
                 layout: layout,
                 edge: anchor.edge,
                 actions: boardActions(),
-                pageState: boardPageState
+                pageState: boardPageState,
+                dragState: boardDragState
             )
         )
 
@@ -724,6 +727,7 @@ final class EdgeController: NSObject {
             },
             newNote: { [weak self] in self?.createNote() },
             cardDragBegan: { [weak self] in self?.cardDragBegan(noteID: $0) },
+            cardDragMoved: { [weak self] in self?.cardDragMoved(noteID: $0, at: $1) },
             cardDragEnded: { [weak self] in self?.cardDragEnded(noteID: $0, at: $1, cancelled: $2) }
         )
     }
@@ -731,18 +735,34 @@ final class EdgeController: NSObject {
     func cardDragBegan(noteID: UUID) {
         guard boardVisible, store.note(with: noteID) != nil else { return }
         draggedCardID = noteID
+        boardDragState.reset()
         cancelClose()
         hidePreview(immediately: true)
+    }
+
+    func cardDragMoved(noteID: UUID, at point: CGPoint) {
+        guard draggedCardID == noteID, let outside = deletionDistance(at: point) else { return }
+        boardDragState.setDeleteArmed(outside)
+    }
+
+    /// `nil` when the board is not visible, so a drop cannot be mistaken for
+    /// an inside-the-board retag.
+    private func deletionDistance(at point: CGPoint) -> Bool? {
+        guard boardVisible, let frame = boardPanel?.frame else { return nil }
+        return BoardDragPolicy.isDeletionDistance(point, boardFrame: frame)
     }
 
     func cardDragEnded(noteID: UUID, at point: CGPoint, cancelled: Bool) {
         guard draggedCardID == noteID else { return }
         draggedCardID = nil
-        if !cancelled, boardVisible, let frame = boardPanel?.frame {
-            if frame.insetBy(dx: -24, dy: -24).contains(point) {
+        boardDragState.reset()
+        if !cancelled, let outside = deletionDistance(at: point) {
+            if outside {
+                if let note = store.note(with: noteID) {
+                    cardUndoToast.delete(note, from: store, on: currentScreen)
+                }
+            } else {
                 retagNote(noteID: noteID, atScreenPoint: point)
-            } else if let note = store.note(with: noteID) {
-                cardUndoToast.delete(note, from: store, on: currentScreen)
             }
         }
         if !isMouseInsideBoard(), !isMouseInsideSeam() { scheduleClose(after: 0.3) }
@@ -910,15 +930,7 @@ final class EdgeController: NSObject {
 
         var height = fitting.height
         if !height.isFinite || height < 120 {
-            let lineCount = min(
-                NoteText.bodyLinesForDisplay(from: note.content)
-                    .filter { $0.kind != .empty && $0.kind != .divider }
-                    .count,
-                11
-            )
-            height = 210 + CGFloat(lineCount) * 27
-            if note.dueAt != nil { height += 8 }
-            if !NoteText.tags(in: note.content).isEmpty { height += 22 }
+            height = NotePreviewView.estimatedHeight(for: note)
         }
 
         height = min(max(height, 140), maxHeight)
@@ -1075,15 +1087,20 @@ final class EdgeController: NSObject {
 
     private func updateDueState(rebuildBoard: Bool) {
         let overdueIDs = Set(store.overdueNotes.map(\.id))
-        let hasDue = !overdueIDs.isEmpty
         let changed = overdueIDs != lastOverdueIDs
         lastOverdueIDs = overdueIDs
-        seamState.hasDueNote = hasDue
-        seamState.overdueCount = overdueIDs.count
+        applyNoteSummary(hasDue: !overdueIDs.isEmpty, count: store.notes.count)
 
         guard changed, rebuildBoard, boardVisible else { return }
         hidePreview(immediately: true)
         refreshBoard(animated: false)
+    }
+
+    /// Publish only real changes: `@Published` notifies even for equal values,
+    /// and a count update should not disturb the light's animation.
+    private func applyNoteSummary(hasDue: Bool, count: Int) {
+        if seamState.hasDueNote != hasDue { seamState.hasDueNote = hasDue }
+        if seamState.noteCount != count { seamState.noteCount = count }
     }
 
     // MARK: - Screen

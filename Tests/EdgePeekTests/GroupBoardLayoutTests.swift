@@ -156,4 +156,15 @@ final class GroupBoardLayoutTests: XCTestCase {
             "#一"
         )
     }
+
+    func testDeleteDistanceStartsAfterTheTwentyFourPointMargin() {
+        let board = CGRect(x: 100, y: 200, width: 400, height: 300)
+        XCTAssertFalse(BoardDragPolicy.isDeletionDistance(CGPoint(x: 300, y: 350), boardFrame: board))
+        XCTAssertFalse(BoardDragPolicy.isDeletionDistance(CGPoint(x: 88, y: 350), boardFrame: board))
+        XCTAssertFalse(BoardDragPolicy.isDeletionDistance(CGPoint(x: 300, y: 188), boardFrame: board))
+        XCTAssertTrue(BoardDragPolicy.isDeletionDistance(CGPoint(x: 525, y: 350), boardFrame: board))
+        XCTAssertTrue(BoardDragPolicy.isDeletionDistance(CGPoint(x: 75, y: 350), boardFrame: board))
+        XCTAssertTrue(BoardDragPolicy.isDeletionDistance(CGPoint(x: 300, y: 175), boardFrame: board))
+        XCTAssertTrue(BoardDragPolicy.isDeletionDistance(CGPoint(x: 530, y: 530), boardFrame: board))
+    }
 }

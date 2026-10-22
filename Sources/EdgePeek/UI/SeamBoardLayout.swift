@@ -117,6 +117,15 @@ enum BoardMetrics {
     static let maximumHeightRatioHorizontal: CGFloat = 0.70
 }
 
+enum BoardDragPolicy {
+    /// Releasing a card this far outside the board deletes it.
+    static let deletionMargin: CGFloat = 24
+
+    static func isDeletionDistance(_ point: CGPoint, boardFrame: CGRect) -> Bool {
+        !boardFrame.insetBy(dx: -deletionMargin, dy: -deletionMargin).contains(point)
+    }
+}
+
 struct BoardCardPlacement: Identifiable {
     let note: StickyNote
     let frame: CGRect

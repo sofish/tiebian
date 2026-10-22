@@ -86,6 +86,17 @@ enum AppTypography {
         return NSFont.monospacedSystemFont(ofSize: size, weight: weight)
     }
 
+    /// Baseline-to-baseline distance for a wrapped line, including the extra
+    /// paragraph spacing SwiftUI adds between lines.
+    static func lineHeight(
+        chinese: Bool = true,
+        size: CGFloat,
+        spacing: CGFloat = 0
+    ) -> CGFloat {
+        let font = nsFont(chinese: chinese, size: size)
+        return max(font.ascender - font.descender + font.leading, size * 1.2) + spacing
+    }
+
     /// Apply the two-script treatment to an AppKit text storage. Hashtags are
     /// tinted like the tags on a paper note, but no Markdown syntax is shown.
     static func applyAttributes(

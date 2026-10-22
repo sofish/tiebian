@@ -25,6 +25,25 @@ final class NoteTagTests: XCTestCase {
         XCTAssertEqual(NoteText.excerpt(from: content), "第一行正文")
     }
 
+    func testDisplayTextKeepsEveryContentLineWithoutATitleSplit() {
+        let content = "第一行\n第二行\n#用法"
+        XCTAssertEqual(NoteText.displayText(from: content), "第一行\n第二行")
+        XCTAssertEqual(StickyNote(content: content).displayText, "第一行\n第二行")
+    }
+
+    func testDisplayTextKeepsPaperGlyphsAndDropsFormattingNoise() {
+        let content = "## 标题\n- 一条\n- [x] 完成\n> 引用\n\n```\ncode\n```"
+        XCTAssertEqual(
+            NoteText.displayText(from: content),
+            "标题\n• 一条\n☑ 完成\n引用\n\ncode"
+        )
+    }
+
+    func testDisplayTextIsEmptyForTagOnlyAndBlankNotes() {
+        XCTAssertEqual(NoteText.displayText(from: "\n#用法\n#快捷键\n"), "")
+        XCTAssertEqual(NoteText.displayText(from: "   \n\n"), "")
+    }
+
     func testTagOnlyContentIsEffectivelyEmpty() {
         XCTAssertTrue(NoteText.isEffectivelyEmpty("\n#用法\n#快捷键"))
         XCTAssertFalse(NoteText.isEffectivelyEmpty("\n#用法\n真的内容"))

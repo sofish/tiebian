@@ -6,6 +6,7 @@ struct NoteCardDragSurface: NSViewRepresentable {
     let image: () -> NSImage?
     let onOpen: () -> Void
     let onDragBegan: () -> Void
+    let onDragMoved: (CGPoint) -> Void
     let onDragEnded: (CGPoint, Bool) -> Void
 
     func makeNSView(context: Context) -> NoteCardDragView {
@@ -19,6 +20,7 @@ struct NoteCardDragSurface: NSViewRepresentable {
         view.image = image
         view.onOpen = onOpen
         view.onDragBegan = onDragBegan
+        view.onDragMoved = onDragMoved
         view.onDragEnded = onDragEnded
     }
 }
@@ -28,6 +30,7 @@ final class NoteCardDragView: NSView, NSDraggingSource {
     var image: () -> NSImage? = { nil }
     var onOpen: () -> Void = {}
     var onDragBegan: () -> Void = {}
+    var onDragMoved: (CGPoint) -> Void = { _ in }
     var onDragEnded: (CGPoint, Bool) -> Void = { _, _ in }
     private var mouseDownPoint: CGPoint?
     private var dragging = false
@@ -67,6 +70,10 @@ final class NoteCardDragView: NSView, NSDraggingSource {
 
     func draggingSession(_ session: NSDraggingSession, willBeginAt screenPoint: NSPoint) {
         onDragBegan()
+    }
+
+    func draggingSession(_ session: NSDraggingSession, movedTo screenPoint: NSPoint) {
+        onDragMoved(screenPoint)
     }
 
     func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {

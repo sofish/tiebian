@@ -10,6 +10,6 @@ final class SeamState: ObservableObject {
     @Published var isDragging = false
     @Published var isSnapping = false
     @Published var hasDueNote = false
-    @Published var overdueCount = 0
+    @Published var noteCount = 0
     @Published var isBoardOpen = false
 }

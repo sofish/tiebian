@@ -15,7 +15,7 @@ struct SeamView: View {
         ZStack {
             Color.clear
             SeamLight(configuration: .init(edge: state.edge, width: state.width,
-                                            hasDue: state.hasDueNote, overdueCount: state.overdueCount,
+                                            hasDue: state.hasDueNote, noteCount: state.noteCount,
                                             animation: state.animation), hovered: state.isHovered)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

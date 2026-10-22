@@ -6,7 +6,7 @@ struct SeamLightConfiguration: Equatable {
     var edge: EdgeSide
     var width: CGFloat
     var hasDue: Bool
-    var overdueCount: Int
+    var noteCount: Int
     var animation: SeamAnimation
 
     var cycle: CFTimeInterval {
@@ -132,11 +132,24 @@ private struct SeamRadiance {
 }
 
 final class SeamLightLayerView: NSView {
+    /// Everything that changes the geometry or the glow animation. The note
+    /// count changes more often than that, so it gets its own cheap update.
+    private struct LayoutSignature: Equatable {
+        var edge: EdgeSide
+        var width: CGFloat
+        var hasDue: Bool
+        var animation: SeamAnimation
+    }
+
+    private static let countFontSize: CGFloat = 8.4
+    private static let overdueCountColor = NSColor(srgbRed: 0.95, green: 0.32, blue: 0.24, alpha: 1)
+
     private let base = CAGradientLayer()
     private let radiance = SeamRadiance()
     private let echo = SeamRadiance()
     private let count = CATextLayer()
     private var configuration: SeamLightConfiguration?
+    private var layoutSignature: LayoutSignature?
     private var hovered = false
     private var renderedSize = CGSize.zero
 
@@ -159,9 +172,21 @@ final class SeamLightLayerView: NSView {
     func configure(_ value: SeamLightConfiguration, hovered: Bool) {
         guard configuration != value || self.hovered != hovered else { return }
         if configuration != value {
+            let signature = LayoutSignature(
+                edge: value.edge,
+                width: value.width,
+                hasDue: value.hasDue,
+                animation: value.animation
+            )
+            if layoutSignature != signature {
+                layoutSignature = signature
+                renderedSize = .zero
+                needsLayout = true
+            }
             configuration = value
-            renderedSize = .zero
-            needsLayout = true
+            // A count-only change (adding or deleting a note) must update the
+            // number without rebuilding the glow or restarting its animation.
+            applyCountStyle(value)
         }
         self.hovered = hovered
         CATransaction.begin()
@@ -169,6 +194,24 @@ final class SeamLightLayerView: NSView {
         if value.hasDue { base.opacity = 0.48 }
         else { base.opacity = hovered ? 0.38 : 0.22 }
         CATransaction.commit()
+    }
+
+    private func applyCountStyle(_ style: SeamLightConfiguration) {
+        count.string = "\(style.noteCount)"
+        count.font = NSFont.monospacedSystemFont(ofSize: Self.countFontSize, weight: .bold)
+        count.fontSize = Self.countFontSize
+        count.alignmentMode = .center
+        // The count always reports every note; overdue turns it red so the
+        // reminder reads without hiding the total.
+        count.foregroundColor = style.hasDue
+            ? Self.overdueCountColor.cgColor
+            : NSColor.white.cgColor
+        count.shadowColor = NSColor.black.withAlphaComponent(0.45).cgColor
+        count.shadowOpacity = 1
+        count.shadowRadius = 1.2
+        count.shadowOffset = .zero
+        count.contentsScale = window?.backingScaleFactor ?? 2
+        count.isHidden = style.noteCount == 0
     }
 
     override func layout() {
@@ -251,17 +294,7 @@ final class SeamLightLayerView: NSView {
         case .bottom: countPosition.y -= offset
         }
         count.frame = CGRect(x: countPosition.x - 10, y: countPosition.y - 6, width: 20, height: 14)
-        count.string = "\(style.overdueCount)"
-        count.font = NSFont.monospacedSystemFont(ofSize: 8.4, weight: .bold)
-        count.fontSize = 8.4
-        count.alignmentMode = .center
-        count.foregroundColor = NSColor.white.cgColor
-        count.contentsScale = window?.backingScaleFactor ?? 2
-        count.isHidden = style.overdueCount == 0
-        let visibility = Self.keyframes("opacity", values: [0, 1, 1, 0, 0], times: [0, 0.04, 0.46, 0.5, 1])
-        visibility.duration = style.cycle * 4
-        visibility.repeatCount = .infinity
-        count.add(visibility, forKey: "count")
+        applyCountStyle(style)
     }
 
     private func configureGlow(_ glow: SeamRadiance, style: SeamLightConfiguration,
