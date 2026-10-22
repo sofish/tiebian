@@ -2,8 +2,14 @@ import AppKit
 
 final class SeamSizeMenuView: NSView {
     enum Dimension {
-        case length, width
-        var title: String { self == .length ? "光条长度" : "光条宽度" }
+        case length, width, count
+        var title: String {
+            switch self {
+            case .length: return "光条长度"
+            case .width: return "光条宽度"
+            case .count: return "光条数字"
+            }
+        }
         var fractionDigits: Int { self == .length ? 0 : 1 }
     }
 

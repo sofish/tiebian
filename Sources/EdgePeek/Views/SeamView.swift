@@ -16,7 +16,8 @@ struct SeamView: View {
             Color.clear
             SeamLight(configuration: .init(edge: state.edge, width: state.width,
                                             hasDue: state.hasDueNote, noteCount: state.noteCount,
-                                            animation: state.animation), hovered: state.isHovered)
+                                            animation: state.animation,
+                                            countSize: state.countSize), hovered: state.isHovered)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay(

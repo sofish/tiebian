@@ -7,10 +7,24 @@ public enum SeamSizing {
     public static let minimumWidth: Double = 2.7
     public static let defaultWidth = minimumWidth * 2
     public static let widthRange = minimumWidth...(minimumWidth * 6)
+    public static let defaultCountSize: Double = 8.4
+    public static let countSizeRange: ClosedRange<Double> = 6...18
 
     public static func width(_ requested: Double) -> Double {
-        let value = requested.isFinite ? requested : defaultWidth
-        return min(max(value, widthRange.lowerBound), widthRange.upperBound)
+        clamped(requested, fallback: defaultWidth, to: widthRange)
+    }
+
+    public static func countSize(_ requested: Double) -> Double {
+        clamped(requested, fallback: defaultCountSize, to: countSizeRange)
+    }
+
+    private static func clamped(
+        _ requested: Double,
+        fallback: Double,
+        to range: ClosedRange<Double>
+    ) -> Double {
+        let value = requested.isFinite ? requested : fallback
+        return EdgeGeometry.clamp(value, lower: range.lowerBound, upper: range.upperBound)
     }
 
     public static func range(edge: EdgeSide, availableSize: CGSize) -> ClosedRange<Double> {
@@ -20,9 +34,11 @@ public enum SeamSizing {
     }
 
     public static func length(_ requested: Double, edge: EdgeSide, availableSize: CGSize) -> Double {
-        let range = range(edge: edge, availableSize: availableSize)
-        let value = requested.isFinite ? requested : defaultLength
-        return min(max(value, range.lowerBound), range.upperBound)
+        clamped(
+            requested,
+            fallback: defaultLength,
+            to: range(edge: edge, availableSize: availableSize)
+        )
     }
 }
 
@@ -42,6 +58,7 @@ public struct SeamPreferences {
     private let defaults: UserDefaults
     private static let key = "EdgePeek.seamLength.v1"
     private static let widthKey = "EdgePeek.seamWidth.v1"
+    private static let countSizeKey = "EdgePeek.seamCountSize.v1"
     private static let animationKey = "EdgePeek.seamAnimation.v1"
 
     public init(defaults: UserDefaults = .standard) {
@@ -50,9 +67,8 @@ public struct SeamPreferences {
 
     public var length: Double {
         get {
-            guard let number = defaults.object(forKey: Self.key) as? NSNumber,
-                  number.doubleValue.isFinite else { return SeamSizing.defaultLength }
-            return max(SeamSizing.minimumLength, number.doubleValue)
+            readDouble(Self.key).map { max(SeamSizing.minimumLength, $0) }
+                ?? SeamSizing.defaultLength
         }
         nonmutating set {
             guard newValue.isFinite else { return }
@@ -61,16 +77,25 @@ public struct SeamPreferences {
     }
 
     public var width: Double {
-        get {
-            guard let number = defaults.object(forKey: Self.widthKey) as? NSNumber else {
-                return SeamSizing.defaultWidth
-            }
-            return SeamSizing.width(number.doubleValue)
-        }
+        get { readDouble(Self.widthKey).map(SeamSizing.width) ?? SeamSizing.defaultWidth }
         nonmutating set {
             guard newValue.isFinite else { return }
             defaults.set(SeamSizing.width(newValue), forKey: Self.widthKey)
         }
+    }
+
+    public var countSize: Double {
+        get { readDouble(Self.countSizeKey).map(SeamSizing.countSize) ?? SeamSizing.defaultCountSize }
+        nonmutating set {
+            guard newValue.isFinite else { return }
+            defaults.set(SeamSizing.countSize(newValue), forKey: Self.countSizeKey)
+        }
+    }
+
+    private func readDouble(_ key: String) -> Double? {
+        guard let number = defaults.object(forKey: key) as? NSNumber,
+              number.doubleValue.isFinite else { return nil }
+        return number.doubleValue
     }
 
     public var animation: SeamAnimation {

@@ -1,6 +1,46 @@
 import EdgePeekCore
 import SwiftUI
 
+struct NotePreviewMetrics {
+    static let spacing: CGFloat = 4
+    static let minimumLines = 6
+    /// Header, rule, footer and side/bottom padding. The blank first line is
+    /// measured per reading size instead of being folded into this total.
+    private static let fixedChromeHeight: CGFloat = 130
+
+    let contentSize: CGFloat
+    let lineHeight: CGFloat
+    /// The preview opens with one blank line, so its top whitespace follows
+    /// the copy's line height at every reading size.
+    let topPadding: CGFloat
+    let contentLineLimit: Int
+
+    var chromeHeight: CGFloat { Self.fixedChromeHeight + topPadding }
+
+    init(contentSize: CGFloat) {
+        self.contentSize = contentSize
+        let lineHeight = AppTypography.lineHeight(size: contentSize, spacing: Self.spacing)
+        self.lineHeight = lineHeight
+        topPadding = lineHeight
+        contentLineLimit = max(
+            Self.minimumLines,
+            Int(floor((Layout.previewMaxHeight - Self.fixedChromeHeight - lineHeight) / lineHeight))
+        )
+    }
+
+    /// Card sizes are resolved from the same reading-size preference, so a
+    /// preset only has to be added to `NoteFontSize`.
+    static func metrics(for size: NoteFontSize) -> NotePreviewMetrics {
+        NotePreviewMetrics(contentSize: size.previewPointSize)
+    }
+
+    static let standard = metrics(for: .standard)
+
+    static var current: NotePreviewMetrics {
+        metrics(for: NoteFontPreferences().size)
+    }
+}
+
 struct NotePreviewView: View {
     let note: StickyNote
     let edge: EdgeSide
@@ -9,33 +49,23 @@ struct NotePreviewView: View {
 
     private let content: String
     private let tags: [String]
+    private let metrics: NotePreviewMetrics
 
     @State private var appeared = false
-    @State private var hovering = false
-
-    static let contentSize: CGFloat = 15.5
-    private static let contentSpacing: CGFloat = 4
-    private static let chromeHeight: CGFloat = 150
-    private static let minimumLines = 6
-    private static let estimatedMaximumLines = 16
-
-    /// The preview is allowed to omit the tail, but only when the copy truly
-    /// cannot fit: it shows every line it can before truncating.
-    private static let contentLineLimit: Int = {
-        let lineHeight = AppTypography.lineHeight(size: contentSize, spacing: contentSpacing)
-        return max(minimumLines, Int(floor((Layout.previewMaxHeight - chromeHeight) / lineHeight)))
-    }()
 
     /// Height used only when AppKit cannot measure the preview (for example
     /// before the view has a window). Keeps the fallback on the same metrics
     /// as the view instead of a second set of magic numbers.
-    static func estimatedHeight(for note: StickyNote) -> CGFloat {
+    static func estimatedHeight(
+        for note: StickyNote,
+        metrics: NotePreviewMetrics = .current
+    ) -> CGFloat {
         let lineCount = min(
             note.displayText.components(separatedBy: "\n").count,
-            estimatedMaximumLines
+            metrics.contentLineLimit
         )
-        var height = chromeHeight
-            + CGFloat(lineCount) * AppTypography.lineHeight(size: contentSize, spacing: contentSpacing)
+        var height = metrics.chromeHeight
+            + CGFloat(lineCount) * metrics.lineHeight
         if note.dueAt != nil { height += 8 }
         if !NoteText.tags(in: note.content).isEmpty { height += 22 }
         return height
@@ -53,21 +83,21 @@ struct NotePreviewView: View {
         self.onOpen = onOpen
         self.content = note.displayText
         self.tags = NoteText.tags(in: note.content)
+        self.metrics = .current
     }
 
     var body: some View {
         Button(action: onOpen) {
             paper
             .frame(width: Layout.previewWidth)
-            .scaleEffect(appeared ? (hovering ? 1.006 : 1) : 0.96)
+            // A fractional hover scale resampled the whole paper, which made
+            // the preview copy look soft next to the crisp card text.
+            .scaleEffect(appeared ? 1 : 0.96)
             .opacity(appeared ? 1 : 0)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover {
-            hovering = $0
-            onHover($0)
-        }
+        .onHover(perform: onHover)
         .onAppear {
             withAnimation(Theme.spring) {
                 appeared = true
@@ -107,16 +137,16 @@ struct NotePreviewView: View {
 
             if content.isEmpty {
                 Text("点开，写几句。")
-                    .font(Theme.hand(14))
+                    .font(Theme.hand(metrics.contentSize))
                     .foregroundStyle(Theme.inkFaint)
                     .padding(.vertical, 2)
             } else {
                 MixedText(
                     content,
-                    size: Self.contentSize,
+                    size: metrics.contentSize,
                     color: Theme.ink,
-                    lineSpacing: Self.contentSpacing,
-                    lineLimit: Self.contentLineLimit
+                    lineSpacing: NotePreviewMetrics.spacing,
+                    lineLimit: metrics.contentLineLimit
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -168,7 +198,7 @@ struct NotePreviewView: View {
             .padding(.top, 14)
         }
         .padding(.horizontal, 20)
-        .padding(.top, 20)
+        .padding(.top, metrics.topPadding)
         .padding(.bottom, 16)
         .frame(width: Layout.previewWidth)
         .background(PaperBackground(color: note.color, cornerRadius: 18))

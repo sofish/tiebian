@@ -8,6 +8,7 @@ struct SeamLightConfiguration: Equatable {
     var hasDue: Bool
     var noteCount: Int
     var animation: SeamAnimation
+    var countSize: CGFloat = SeamSizing.defaultCountSize
 
     var cycle: CFTimeInterval {
         switch animation {
@@ -141,8 +142,8 @@ final class SeamLightLayerView: NSView {
         var animation: SeamAnimation
     }
 
-    private static let countFontSize: CGFloat = 8.4
     private static let overdueCountColor = NSColor(srgbRed: 0.95, green: 0.32, blue: 0.24, alpha: 1)
+    private static let countShadowColor = NSColor.black.withAlphaComponent(0.45).cgColor
 
     private let base = CAGradientLayer()
     private let radiance = SeamRadiance()
@@ -152,6 +153,9 @@ final class SeamLightLayerView: NSView {
     private var layoutSignature: LayoutSignature?
     private var hovered = false
     private var renderedSize = CGSize.zero
+    private var countCenter = CGPoint.zero
+    private var appliedCountSize: CGFloat?
+    private var appliedCountFrame: CGRect?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -197,21 +201,43 @@ final class SeamLightLayerView: NSView {
     }
 
     private func applyCountStyle(_ style: SeamLightConfiguration) {
+        // Sliders call this on every pointer move, and `frame` is animatable;
+        // without an explicit transaction each tick would queue a fresh
+        // implicit animation and leave the number trailing the drag.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+
         count.string = "\(style.noteCount)"
-        count.font = NSFont.monospacedSystemFont(ofSize: Self.countFontSize, weight: .bold)
-        count.fontSize = Self.countFontSize
+        if appliedCountSize != style.countSize {
+            appliedCountSize = style.countSize
+            count.font = NSFont.monospacedSystemFont(ofSize: style.countSize, weight: .bold)
+            count.fontSize = style.countSize
+        }
         count.alignmentMode = .center
         // The count always reports every note; overdue turns it red so the
         // reminder reads without hiding the total.
         count.foregroundColor = style.hasDue
             ? Self.overdueCountColor.cgColor
             : NSColor.white.cgColor
-        count.shadowColor = NSColor.black.withAlphaComponent(0.45).cgColor
+        count.shadowColor = Self.countShadowColor
         count.shadowOpacity = 1
         count.shadowRadius = 1.2
         count.shadowOffset = .zero
         count.contentsScale = window?.backingScaleFactor ?? 2
         count.isHidden = style.noteCount == 0
+
+        let halfExtent = SeamMetrics.countHalfExtent(countSize: style.countSize)
+        let frame = CGRect(
+            x: countCenter.x - halfExtent,
+            y: countCenter.y - SeamMetrics.countHeight(countSize: style.countSize) / 2,
+            width: halfExtent * 2,
+            height: SeamMetrics.countHeight(countSize: style.countSize)
+        )
+        if appliedCountFrame != frame {
+            appliedCountFrame = frame
+            count.frame = frame
+        }
     }
 
     override func layout() {
@@ -293,7 +319,7 @@ final class SeamLightLayerView: NSView {
         case .top: countPosition.y += offset
         case .bottom: countPosition.y -= offset
         }
-        count.frame = CGRect(x: countPosition.x - 10, y: countPosition.y - 6, width: 20, height: 14)
+        countCenter = countPosition
         applyCountStyle(style)
     }
 
